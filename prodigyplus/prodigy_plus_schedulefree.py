@@ -61,7 +61,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             (default 0, which disables smoothing and uses original Prodigy behaviour).
         eps (float):
             Term added to the denominator outside of the root operation to improve numerical stability.
-            (default: 1e-6).
+            Unused if adam_atan2 is True.
+            (default: 1e-8).
         weight_decay (float):
             Decoupled weight decay. Value is multiplied by the adaptive learning rate.
             (default: 0).
@@ -76,7 +77,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Changing this parameter is the preferred way to tune the method.
         prodigy_steps (int):
             Freeze Prodigy stepsize adjustments after a certain optimiser step.
-            (default None)
+            (default 0)
         warmup_steps (int): 
             Enables a linear learning rate warmup (default 0). Use this over the warmup settings
             of your LR scheduler.
@@ -92,6 +93,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         bf16_state (boolean):
             Stores the p0 and s state variables in bfloat16. Only relevant if training in float32.
             Can save additional memory, but has much less impact when using slice_p (default False).
+        adam_atan2 (boolean):
+            Use atan2 rather than epsilon and division for parameter updates (https://arxiv.org/abs/2407.05872). 
+            Not compatible with StableAdamW. (default True)
     """
     def __init__(self, params, lr=1.0,
                  use_schedulefree=True,
@@ -99,12 +103,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  weight_decay=0.0,
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
-                 eps=1e-6,
-                 prodigy_steps=None,
-                 warmup_steps=0,
+                 eps=1e-8,
+                 prodigy_steps=-1,
+                 warmup_steps=-1,
                  split_groups=True,
                  slice_p=10,
-                 bf16_state=False):
+                 bf16_state=False,
+                 adam_atan2=True):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -136,7 +141,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
-                        bf16_state=bf16_state)
+                        bf16_state=bf16_state,
+                        adam_atan2=adam_atan2)
         
         self.d0 = d0
         self.split_groups = split_groups
@@ -182,7 +188,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     def supports_flat_params(self):
         return True
     
-    def get_sliced_tensor(self, tensor, slice_p=8):
+    def get_sliced_tensor(self, tensor, slice_p):
         # Downsample the tensor by using only a portion of parameters.
         flat_tensor = tensor.ravel()
 
@@ -198,7 +204,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         # stride = (flattened_tensor.stride(0) * slice_p,)
         # sliced_tensor = torch.as_strided(flattened_tensor, size=(numel,), stride=stride)
         # return sliced_tensor
-   
+
     def initialise_state(self, p, state, slice_p, bf16_state):
         if len(state) > 0:
             return
@@ -206,7 +212,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         sliced_data = self.get_sliced_tensor(p.data, slice_p)
 
         # z is exp_avg when schedule-free is disabled.
-        state['z'] = torch.zeros_like(p.data).detach()
+        if self.use_schedulefree:
+            state['z'] = p.data.clone().detach()
+        else:
+            state['z'] = torch.zeros_like(p.data).detach()
         state['exp_avg_sq'] = torch.zeros_like(p.data).detach()
 
         # If the initial weights are zero, don't bother storing them.
@@ -261,7 +270,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             warmup_steps = group['warmup_steps']
 
             d = group['d']
-            d0 = group['d0']
             d_coef = group['d_coef']
             d_numerator = group['d_numerator']
 
@@ -269,6 +277,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             use_bias_correction = group['use_bias_correction']
             slice_p = group['slice_p']
             bf16_state = group['bf16_state']
+            adam_atan2 = group['adam_atan2']
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
@@ -282,7 +291,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 bias_correction = 1
 
             dlr = d * lr * bias_correction
-            d_update = (d / d0) * dlr
+            d_update = dlr * (1 - beta3)
 
             if k < warmup_steps:
                 dlr *= (k / warmup_steps) ** 2
@@ -329,15 +338,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if d_denom_item == 0:
                 continue
 
-            if prodigy_steps is None or k < prodigy_steps:
+            if k < prodigy_steps:
                 d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
-                
-                if beta4 > 0:
-                    d = d * beta4 + (1 - beta4) * d_hat
-                else:
-                    d = max(d_hat, d)
+                d = d * beta4 + (1 - beta4) * d_hat if beta4 > 0 else max(d_hat, d)
 
             weight_decay = dlr * decay
+            one_over_pi = 1 / torch.pi
 
             # Split the schedule-free and regular AdamW logic so we don't have 
             # convoluted branching within the loop.
@@ -349,12 +355,16 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     exp_avg = state['z']
                     exp_avg_sq = state['exp_avg_sq']
                    
-                    denom = exp_avg_sq.sqrt().add_(d * eps)
-                    update = exp_avg.div(denom)
+                    if adam_atan2:
+                        denom = exp_avg_sq.sqrt()
+                        update = exp_avg.atan2(denom).mul(one_over_pi)
+                    else:
+                        denom = exp_avg_sq.sqrt().add_(d * eps)
+                        update = exp_avg.div(denom)
 
-                    # StableAdamW
-                    rms = grad.pow(2).div_(denom).mean().sqrt()
-                    update.div_(rms.clip(min=1.0))
+                        # StableAdamW
+                        rms = grad.pow(2).div_(denom).mean().sqrt()
+                        update.div_(rms.clip(min=1.0))
 
                     # AdamW-style decoupled weight decay.
                     p.data.mul_(1.0 - weight_decay).add_(update, alpha=-dlr)
@@ -373,13 +383,17 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
                     z = state['z']
                     exp_avg_sq = state['exp_avg_sq']
-                   
-                    denom = exp_avg_sq.sqrt().add_(d * eps)
-                    update = grad.div(denom).mul_(d)
 
-                    # StableAdamW.
-                    rms = update.pow(2).mean().sqrt()
-                    update.div_(rms.clip(min=1.0))
+                    if adam_atan2:
+                        denom = exp_avg_sq.sqrt()
+                        update = grad.atan2(denom).mul_(one_over_pi)
+                    else:
+                        denom = exp_avg_sq.sqrt().add_(d * eps)
+                        update = grad.div(denom).mul_(d)
+
+                        # StableAdamW.
+                        rms = update.pow(2).mean().sqrt()
+                        update.div_(rms.clip(min=1.0))
 
                     # Weight decay.
                     update.add_(y, alpha=weight_decay)
