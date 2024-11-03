@@ -3,14 +3,14 @@ import torch.optim
 
 class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     r"""
-    A modification of the Prodigy optimiser to include togglable schedule-free logic. Has additional improvements in the form of
+    An optimiser based on Prodigy that includes togglable schedule-free logic. Has additional improvements in the form of
     StableAdamW gradient scaling, per parameter group adaptation, lower memory utilisation and moving average stepsizes.
 
     Based on code from:
     https://github.com/facebookresearch/schedule_free
     https://github.com/konstmish/prodigy
 
-    Incorporates improvements from these pull requests:
+    Incorporates improvements from these pull requests (credit to https://github.com/dxqbYD and https://github.com/sangoi-exe):
     https://github.com/konstmish/prodigy/pull/23
     https://github.com/konstmish/prodigy/pull/22
     https://github.com/konstmish/prodigy/pull/20
@@ -30,16 +30,16 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     contrary to Prodigy's default behaviour, which never decreases the stepsize.
 
     Recommended values for beta4 if set manually are 0.99-0.999, with lower values making the adaptation more noisy and aggressive.
-    If beta4 is set to none, beta2 is used.
+    If beta4 is set to None, beta2 is used.
     
-    By default, split_groups is set to True, so each parameter group will have its own set of adaptation values. So if you're training
+    By default, split_groups is set to True, so each parameter group will have its own adaptation values. So if you're training
     different networks together, they won't contaminate each other's learning rates. The disadvantage of this approach is that some 
-    networks can take a long time to reach a good learning rate when trained with others (for example, SDXL's Unet). It is recommended
-    to use a higher d0 (5e-5 or 1e-4) so these networks don't get stuck at a low learning rate for the majority of training.
+    networks can take a long time to reach a good learning rate when trained alongside others (for example, SDXL's Unet). 
+    It's recommended to use a higher d0 (1e-5, 5e-5, 1e-4) so these networks don't get stuck at a low learning rate.
     
-    For Prodigy's default behaviour, which effectively lumps all parameters together, set split_groups to False.
+    For Prodigy's default behaviour, which lumps all parameter groups together, set split_groups to False.
 
-    In some scenarios, it can be advantageous to prevent Prodigy from updating the stepsize after a certain number of steps. This
+    In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
     can be controlled via the prodigy_steps settings.
 
     Arguments:
@@ -63,13 +63,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Term added to the denominator outside of the root operation to improve numerical stability.
             (default: 1e-6).
         weight_decay (float):
-            Decoupled weight decay. Value is multiplied by the adaptive learning rate .
+            Decoupled weight decay. Value is multiplied by the adaptive learning rate.
             (default: 0).
         use_bias_correction (boolean):
             Turn on Adam's bias correction. Off by default.
         d0 (float):
-            Initial D estimate for D-adaptation (default 1e-6). A higher value may be needed if split_groups
-            is set to True or beta4 is not 0.
+            Initial estimate for Prodigy (default 1e-6). A higher value may be needed if split_groups
+            is set to True and/or beta4 is not 0.
         d_coef (float):
             Coefficient in the expression for the estimate of d (default 1.0).
             Values such as 0.5 and 2.0 typically work as well. 
@@ -83,12 +83,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         split_groups (boolean):
             Track individual adaptation values for each parameter group. For example, if training
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
-            Set to False for original Prodigy behaviour, where all groups shared the same values.
+            Set to False for original Prodigy behaviour, where all groups share the same values.
             (default True)
         slice_p (int):
             Downsamples p0 and s state variables by storing only every nth element. 
             Significantly reduces state memory with a negligble impact on adaptive step size predictions. 
-            Higher values reduce memory usage, but have a greater impact on predicition accuracy (default 8).
+            Higher values reduce memory usage, but have a greater impact on predicition accuracy (default 10).
         bf16_state (boolean):
             Stores the p0 and s state variables in bfloat16. Only relevant if training in float32.
             Can save additional memory, but has much less impact when using slice_p (default False).
@@ -103,7 +103,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  prodigy_steps=None,
                  warmup_steps=0,
                  split_groups=True,
-                 slice_p=8,
+                 slice_p=10,
                  bf16_state=False):
         
         if not 0.0 < d0:
@@ -238,6 +238,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             groups = self.param_groups
             all_params = None
         else:
+            # Emulate original Prodigy implementation.
             groups = [self.param_groups[0]]
             all_params = []
             for group in self.param_groups:
@@ -375,7 +376,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                    
                     denom = exp_avg_sq.sqrt().add_(d * eps)
                     update = grad.div(denom).mul_(d)
-                    
+
                     # StableAdamW.
                     rms = update.pow(2).mean().sqrt()
                     update.div_(rms.clip(min=1.0))
