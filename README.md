@@ -40,6 +40,6 @@ In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize 
 can be controlled via the prodigy_steps settings.
 
 ## Default settings
-`lr=1.0, use_schedulefree=True, betas=(0.9, 0.99), beta3=None, beta4=0, weight_decay=0.0, use_bias_correction=False, d0=1e-6, d_coef=1.0, eps=1e-6, prodigy_steps=None, warmup_steps=0, split_groups=True, slice_p=10, bf16_state=False`
+`lr=1.0, use_schedulefree=True, betas=(0.9, 0.99), beta3=None, beta4=0, weight_decay=0.0, use_bias_correction=False, d0=1e-8, d_coef=1.0, eps=1e-8, prodigy_steps=0, warmup_steps=0, split_groups=True, slice_p=10, bf16_state=False, adam_atan2=True`
 ## Recommended settings
-`lr=1.0, use_schedulefree=True, betas=(0.9, 0.99), beta3=None, beta4=None, weight_decay=0.01, use_bias_correction=False, d0=5e-5, d_coef=1.0, eps=1e-6, prodigy_steps=None, warmup_steps=0, split_groups=True, slice_p=10, bf16_state=False`
+`lr=1.0, use_schedulefree=True, betas=(0.9, 0.99), beta3=None, beta4=None, weight_decay=0.01, use_bias_correction=False, d0=5e-5, d_coef=1.0, eps=1e-8, prodigy_steps=0, warmup_steps=0, split_groups=True, slice_p=10, bf16_state=False, adam_atan2=True`
