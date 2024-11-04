@@ -39,6 +39,9 @@ Set split_groups to False to mimic Prodigy's normal behaviour, which uses a sing
 In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
 can be controlled via the prodigy_steps settings.
 
+**Update - 4/11/2024:** Now uses Adam-atan2 by default for parameter updates (https://arxiv.org/abs/2407.05872). This is
+not compatible with StableAdamW, however, the use of atan2 appears to naturally bound the updates. Needs more testing, can be disabled via `adam_atan2=False`.
+
 ## Default settings
 `lr=1.0, use_schedulefree=True, betas=(0.9, 0.99), beta3=None, beta4=0, weight_decay=0.0, use_bias_correction=False, d0=1e-8, d_coef=1.0, eps=1e-8, prodigy_steps=0, warmup_steps=0, split_groups=True, slice_p=10, bf16_state=False, adam_atan2=True`
 ## Recommended settings
