@@ -364,8 +364,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             adam_atan2 = group['adam_atan2']
             eps = group['eps']
 
-            one_over_pi = 1 / torch.pi
-            
+            two_over_pi = 2.0 / torch.pi
+
             # Split the schedule-free and regular AdamW logic so we don't have 
             # convoluted branching within the loop.
             if not self.use_schedulefree:
@@ -381,7 +381,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         denom = state['exp_avg_sq'].sqrt()
                    
                     if adam_atan2:
-                        update = exp_avg.atan2(denom).mul_(one_over_pi)
+                        update = exp_avg.atan2(denom).mul_(two_over_pi)
                     else:
                         update = exp_avg.div(denom.add_(d * eps))
 
@@ -412,7 +412,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         denom = state['exp_avg_sq'].sqrt()
 
                     if adam_atan2:
-                        update = grad.atan2(denom).mul_(one_over_pi)
+                        update = grad.atan2(denom).mul_(two_over_pi)
                     else:
                         update = grad.div(denom.add_(d * eps)).mul_(d)
 
