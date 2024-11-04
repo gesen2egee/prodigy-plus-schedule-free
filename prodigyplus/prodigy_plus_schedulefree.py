@@ -373,7 +373,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
                     exp_avg = state['z']
                     
-                    if factored and len(grad.shape) >= 2:
+                    if factored and grad.dim() > 1:
                         denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
                     else:
                         denom = state['exp_avg_sq'].sqrt()
@@ -381,12 +381,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     if adam_atan2:
                         update = exp_avg.atan2(denom)
                     else:
-                        update = exp_avg.div_(denom.add_(d * eps))
+                        update = exp_avg.div(denom.add_(d * eps))
 
-                        # StableAdamW
-                        rms = grad.pow(2).div_(denom).mean().sqrt()
+                        # StableAdamW.
+                        rms = grad.mul(d).pow_(2).div_(denom).mean().sqrt()
                         update.div_(rms.clip(min=1.0))
-
+                        
                     # AdamW-style decoupled weight decay.
                     p.data.mul_(1.0 - weight_decay).add_(update, alpha=-dlr)
             else:
