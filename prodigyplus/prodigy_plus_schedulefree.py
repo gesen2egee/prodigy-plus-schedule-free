@@ -379,9 +379,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         denom = state['exp_avg_sq'].sqrt()
                    
                     if adam_atan2:
-                        update = exp_avg.mul(d).atan2(denom)
+                        update = exp_avg.atan2(denom)
                     else:
-                        update = exp_avg.mul(d).div_(denom.add_(d * eps))
+                        update = exp_avg.div_(denom.add_(d * eps))
 
                         # StableAdamW
                         rms = grad.pow(2).div_(denom).mean().sqrt()
