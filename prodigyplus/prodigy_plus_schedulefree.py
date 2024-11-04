@@ -274,12 +274,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 raise Exception("Not in train mode!")
 
             lr = group['lr']
-            decay = group['weight_decay']
 
             beta1, beta2 = group['betas']
             beta3 = group['beta3']
             beta4 = group['beta4']
-            eps = group['eps']
 
             k = group['k'] + 1
             prodigy_steps = group['prodigy_steps']
@@ -289,11 +287,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_coef = group['d_coef']
             d_numerator = group['d_numerator']
 
-            initialised = group['initialised']
-            use_bias_correction = group['use_bias_correction']
             slice_p = group['slice_p']
-            bf16_state = group['bf16_state']
-            adam_atan2 = group['adam_atan2']
             factored = group['factored']
 
             if beta3 is None:
@@ -302,7 +296,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if beta4 is None:
                 beta4 = beta2
 
-            if use_bias_correction:
+            if group['use_bias_correction']:
                 bias_correction = ((1 - beta2 ** k) ** 0.5) / (1 - beta1 ** k)
             else:
                 bias_correction = 1
@@ -310,6 +304,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             dlr = d * lr * bias_correction
             d_update = dlr * (1 - beta3)
 
+            # Apply warmup separate to the denom and numerator updates.
             if k < warmup_steps:
                 dlr *= (k / warmup_steps) ** 2
 
@@ -322,9 +317,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             params = group['params'] if all_params is None else all_params
             active_p = [p for p in params if p.grad is not None]
 
-            if initialised is None:
+            if group['initialised'] is None:
                 for p in active_p:
-                    self.initialise_state(p, self.state[p], slice_p, bf16_state)
+                    self.initialise_state(p, self.state[p], slice_p, group['bf16_state'], factored)
                 group['initialised'] = True
 
             for p in active_p:
@@ -365,9 +360,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
                 d = d * beta4 + (1 - beta4) * d_hat if beta4 > 0 else max(d_hat, d)
 
-            weight_decay = dlr * decay
-            one_over_pi = 1 / torch.pi
+            weight_decay = dlr * group['weight_decay']
+            adam_atan2 = group['adam_atan2']
+            eps = group['eps']
 
+            one_over_pi = 1 / torch.pi
+            
             # Split the schedule-free and regular AdamW logic so we don't have 
             # convoluted branching within the loop.
             if not self.use_schedulefree:
