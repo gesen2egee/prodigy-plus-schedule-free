@@ -338,7 +338,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if d_denom_item == 0:
                 continue
 
-            if k < prodigy_steps:
+            if prodigy_steps <= 0 or k < prodigy_steps:
                 d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
                 d = d * beta4 + (1 - beta4) * d_hat if beta4 > 0 else max(d_hat, d)
 
