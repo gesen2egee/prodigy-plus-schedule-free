@@ -98,7 +98,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Not compatible with StableAdamW. (default True)
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
-            (default True)
+            (default False)
     """
     def __init__(self, params, lr=1.0,
                  use_schedulefree=True,
@@ -113,7 +113,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  slice_p=10,
                  bf16_state=False,
                  adam_atan2=True,
-                 factored=True):
+                 factored=False):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
