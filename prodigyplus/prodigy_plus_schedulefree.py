@@ -90,7 +90,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         slice_p (int):
             Downsamples p0 and s state variables by storing only every nth element. 
             Significantly reduces state memory with a negligble impact on adaptive step size predictions. 
-            Higher values reduce memory usage, but have a greater impact on predicition accuracy (default 10).
+            Higher values reduce memory usage, but have a greater impact on predicition accuracy (default 11).
         bf16_state (boolean):
             Stores the p0 and s state variables in bfloat16. Only relevant if training in float32.
             Can save additional memory, but has much less impact when using slice_p (default False).
@@ -111,7 +111,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  prodigy_steps=0,
                  warmup_steps=0,
                  split_groups=True,
-                 slice_p=10,
+                 slice_p=11,
                  bf16_state=False,
                  adam_atan2=True,
                  factored=False):
