@@ -4,7 +4,7 @@ import torch.optim
 
 class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     r"""
-    An optimiser based on Prodigy that includes togglable schedule-free logic. Has additional improvements in the form of
+    An optimiser based on Prodigy that includes schedule-free logic. Has additional improvements in the form of
     StableAdamW gradient scaling, per parameter group adaptation, lower memory utilisation and moving average stepsizes.
 
     Based on code from:
@@ -48,8 +48,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Iterable of parameters to optimize or dicts defining parameter groups.
         lr (float):
             Learning rate adjustment parameter. Increases or decreases the Prodigy learning rate.
-        use_schedulefree (boolean):
-            If set to False, disables schedule-free logic and uses regular AdamW updates instead.
         betas (Tuple[float, float], optional): 
             Coefficients used for computing running averages of gradient and its square 
             (default: (0.9, 0.99))
@@ -106,7 +104,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             help if Prodigy adapts too slowly, but risks overshooting. (default True)
     """
     def __init__(self, params, lr=1.0,
-                 use_schedulefree=True,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
                  weight_decay=0.0,
                  use_bias_correction=False,
@@ -158,14 +155,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         
         self.d0 = d0
         self.split_groups = split_groups
-        self.use_schedulefree = use_schedulefree
 
         super().__init__(params, defaults)
 
     def eval(self):
-        if not self.use_schedulefree:
-            return
-        
         for group in self.param_groups:
             train_mode = group['train_mode']
             beta1, _ = group['betas']
@@ -178,9 +171,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 group['train_mode'] = False
 
     def train(self):
-        if not self.use_schedulefree:
-            return
-
         for group in self.param_groups:
             train_mode = group['train_mode']
             beta1, _ = group['betas']
@@ -232,11 +222,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         grad = p.grad.data
         sliced_data = self.get_sliced_tensor(p.data, slice_p)
 
-        # z is exp_avg when schedule-free is disabled.
-        if self.use_schedulefree:
-            state['z'] = p.data.clone().detach()
-        else:
-            state['z'] = torch.zeros_like(p.data).detach()
+        state['z'] = p.data.clone().detach()
 
         if factored and grad.dim() > 1:
             state["exp_avg_sq_row"] = grad.new_zeros(grad.shape[:-1]).detach()
@@ -343,9 +329,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 sliced_data = self.get_sliced_tensor(p.data, slice_p)
 
                 # Adam EMA updates
-                if not self.use_schedulefree:
-                    state['z'].mul_(beta1).add_(grad, alpha=d * (1 - beta1))
-
                 if factored and grad.dim() > 1:
                     grad_sq = grad.square().add_(1e-30)
                     state["exp_avg_sq_row"].mul_(beta2).add_(grad_sq.mean(dim=-1), alpha=d * d * (1 - beta2))
@@ -393,67 +376,41 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             adam_atan2 = group['adam_atan2']
             eps = group['eps']
 
-            # Split the schedule-free and regular AdamW logic so we don't have 
-            # convoluted branching within the loop.
-            if not self.use_schedulefree:
-                for p in active_p:
-                    grad = p.grad.data
-                    state = self.state[p]
+            lr_max = group['lr_max'] = max(dlr, group['lr_max'])
 
-                    exp_avg = state['z']
-                    
-                    if factored and grad.dim() > 1:
-                        denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
-                    else:
-                        denom = state['exp_avg_sq'].sqrt()
-                   
-                    if adam_atan2:
-                        update = exp_avg.atan2(denom)
-                    else:
-                        update = exp_avg.div(denom.add_(d * eps))
+            weight = lr_max ** 2
+            weight_sum = group['weight_sum'] = group['weight_sum'] + weight
 
-                        # StableAdamW.
-                        rms = grad.mul(d).pow_(2).div_(denom).mean().sqrt()
-                        update.div_(rms.clip(min=1.0))
-                        
-                    # AdamW-style decoupled weight decay.
-                    p.data.mul_(1.0 - weight_decay).add_(update, alpha=-dlr)
-            else:
-                lr_max = group['lr_max'] = max(dlr, group['lr_max'])
+            ckp1 = weight / weight_sum if weight_sum else 0
 
-                weight = lr_max ** 2
-                weight_sum = group['weight_sum'] = group['weight_sum'] + weight
+            for p in active_p:
+                y = p.data
+                grad = p.grad.data
+                state = self.state[p]
 
-                ckp1 = weight / weight_sum if weight_sum else 0
+                z = state['z']
 
-                for p in active_p:
-                    y = p.data
-                    grad = p.grad.data
-                    state = self.state[p]
+                if factored and grad.dim() > 1:
+                    denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
+                else:
+                    denom = state['exp_avg_sq'].sqrt()
 
-                    z = state['z']
+                if adam_atan2:
+                    update = grad.mul(d).atan2(denom)
+                else:
+                    update = grad.mul(d).div_(denom.add_(d * eps))
 
-                    if factored and grad.dim() > 1:
-                        denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
-                    else:
-                        denom = state['exp_avg_sq'].sqrt()
+                    # StableAdamW.
+                    rms = update.pow(2).mean().sqrt()
+                    update.div_(rms.clip(min=1.0))
 
-                    if adam_atan2:
-                        update = grad.mul(d).atan2(denom)
-                    else:
-                        update = grad.mul(d).div_(denom.add_(d * eps))
+                # Weight decay.
+                update.add_(y, alpha=weight_decay)
 
-                        # StableAdamW.
-                        rms = update.pow(2).mean().sqrt()
-                        update.div_(rms.clip(min=1.0))
+                y.lerp_(end=z, weight=ckp1)
+                y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
 
-                    # Weight decay.
-                    update.add_(y, alpha=weight_decay)
-
-                    y.lerp_(end=z, weight=ckp1)
-                    y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
-
-                    z.sub_(update, alpha=dlr)
+                z.sub_(update, alpha=dlr)
 
             group['k'] = k
 
