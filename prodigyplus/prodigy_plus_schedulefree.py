@@ -87,8 +87,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Significantly reduces state memory with a negligble impact on adaptive step size predictions. 
             Higher values reduce memory usage, but have a greater impact on predicition accuracy (default 11).
         bf16_state (boolean):
-            Stores the p0 and s state variables in bfloat16. Only relevant if training in float32.
-            Can save additional memory, but has much less impact when using slice_p (default False).
+            Stores p0 and s state variables in bfloat16. Only relevant if training in float32.
+            Can save additional memory, but has much less impact when using slice_p (default True).
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
             (default False)
@@ -108,7 +108,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  warmup_steps=0,
                  split_groups=True,
                  slice_p=11,
-                 bf16_state=False,
+                 bf16_state=True,
                  factored=False,
                  amplify_gradients=True,
                  foreach=hasattr(torch, "_foreach_mul_")):
