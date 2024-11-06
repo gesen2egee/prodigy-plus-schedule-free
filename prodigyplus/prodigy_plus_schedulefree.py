@@ -131,7 +131,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         train_mode=True,
                         slice_p=slice_p,
                         weight_sum=0,
-                        eps=eps,
                         split_groups=split_groups,
                         prodigy_steps=prodigy_steps,
                         warmup_steps=warmup_steps,
@@ -140,7 +139,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         bf16_state=bf16_state,
-                        adam_atan2=adam_atan2,
                         factored=factored,
                         amplify_gradients=amplify_gradients)
         
