@@ -57,7 +57,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             If set to None, uses the value of square root of beta2 (default: None).
         beta4 (float):
             Smoothing coefficient for updating the running average of the Prodigy stepsize. 
-            If set to None, beta2 is used instead. 
+            If set to None, beta2 is used instead. Alternatively, set a negative value to only apply
+            smoothing when d_hat is less than d (abs(beta4) will be used)
             (default 0, which disables smoothing and uses original Prodigy behaviour).
         eps (float):
             Term added to the denominator outside of the root operation to improve numerical stability.
@@ -350,15 +351,24 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             # Materialise final values off-device once we're done.
             d_numerator += d_numerator_accum.item()
             d_denom_item = d_denom.item()
-            
-            d_hat = d
 
-            if d_denom_item == 0:
-                continue
+            # Use atan2 so we no longer need to worry about d_denom being 0. This
+            # does reduce the usefulness of d_coef.
+            d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), 1e-6)
 
             if prodigy_steps <= 0 or k < prodigy_steps:
-                d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
-                d = d * beta4 + (1 - beta4) * d_hat if beta4 > 0 else max(d_hat, d)
+                if beta4 > 0:
+                    # Always update d via EMA.
+                    d = d * beta4 + (1 - beta4) * d_hat
+                elif beta4 < 0:
+                    # Only update d via EMA if d_hat is decreasing.
+                    if d_hat >= d:
+                        d = d_hat
+                    else:
+                        beta4 = abs(beta4)
+                        d = d * beta4 + (1 - beta4) * d_hat
+                else:
+                    d = max(d_hat, d)
 
             weight_decay = dlr * group['weight_decay']
             adam_atan2 = group['adam_atan2']
