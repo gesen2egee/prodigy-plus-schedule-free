@@ -59,10 +59,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             If set to None, beta2 is used instead. Alternatively, set a negative value to only apply
             smoothing when d_hat is less than d (abs(beta4) will be used)
             (default 0, which disables smoothing and uses original Prodigy behaviour).
-        eps (float):
-            Term added to the denominator outside of the root operation to improve numerical stability.
-            Unused if adam_atan2 is True.
-            (default: 1e-8).
         weight_decay (float):
             Decoupled weight decay. Value is multiplied by the adaptive learning rate.
             (default: 0).
@@ -93,9 +89,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         bf16_state (boolean):
             Stores the p0 and s state variables in bfloat16. Only relevant if training in float32.
             Can save additional memory, but has much less impact when using slice_p (default False).
-        adam_atan2 (boolean):
-            Use atan2 rather than epsilon and division for parameter updates (https://arxiv.org/abs/2407.05872). 
-            Not compatible with StableAdamW. (default True)
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
             (default False)
@@ -108,13 +101,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  weight_decay=0.0,
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
-                 eps=1e-8,
                  prodigy_steps=0,
                  warmup_steps=0,
                  split_groups=True,
                  slice_p=11,
                  bf16_state=False,
-                 adam_atan2=True,
                  factored=False,
                  amplify_gradients=True):
         
@@ -373,8 +364,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     d = max(d_hat, d)
 
             weight_decay = dlr * group['weight_decay']
-            adam_atan2 = group['adam_atan2']
-            eps = group['eps']
 
             lr_max = group['lr_max'] = max(dlr, group['lr_max'])
 
@@ -395,14 +384,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 else:
                     denom = state['exp_avg_sq'].sqrt()
 
-                if adam_atan2:
-                    update = grad.mul(d).atan2(denom)
-                else:
-                    update = grad.mul(d).div_(denom.add_(d * eps))
-
-                    # StableAdamW.
-                    rms = update.pow(2).mean().sqrt()
-                    update.div_(rms.clip(min=1.0))
+                # Adam-atan2. Use atan2 rather than epsilon and division for parameter updates (https://arxiv.org/abs/2407.05872). 
+                update = grad.mul(d).atan2(denom)
 
                 # Weight decay.
                 update.add_(y, alpha=weight_decay)
