@@ -152,6 +152,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         super().__init__(params, defaults)
 
+    @torch.no_grad()
     def eval(self):
         for group in self.param_groups:
             train_mode = group['train_mode']
@@ -161,9 +162,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     state = self.state[p]
                     if 'z' in state:
                         # Set p.data to x
-                        p.data.lerp_(end=state['z'].to(p.data.device), weight=1-1/beta1)
+                        p.lerp_(end=state['z'].to(device=p.device), weight=1-1/beta1)
                 group['train_mode'] = False
 
+    @torch.no_grad()
     def train(self):
         for group in self.param_groups:
             train_mode = group['train_mode']
@@ -173,7 +175,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     state = self.state[p]
                     if 'z' in state:
                         # Set p.data to y
-                        p.data.lerp_(end=state['z'].to(p.data.device), weight=1-beta1)
+                        p.lerp_(end=state['z'].to(device=p.device), weight=1-beta1)
                 group['train_mode'] = True
 
     @property
@@ -184,11 +186,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     def supports_flat_params(self):
         return True
     
+    @torch.no_grad()
     def approx_sqrt(self, row, col):
         r_factor = (row / row.mean(dim=-1, keepdim=True)).sqrt_().unsqueeze(-1)
         c_factor = col.unsqueeze(-2).sqrt()
         return torch.mul(r_factor, c_factor)
 
+    @torch.no_grad()
     def get_sliced_tensor(self, tensor, slice_p):
         # Downsample the tensor by using only a portion of parameters.
         flat_tensor = tensor.ravel()
@@ -206,40 +210,42 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         # sliced_tensor = torch.as_strided(flattened_tensor, size=(numel,), stride=stride)
         # return sliced_tensor
 
+    @torch.no_grad()
     def signed_sqrt(self, tensor):
         return tensor.abs().sqrt_().mul_(tensor.sign())
 
+    @torch.no_grad()
     def denom_from_state(self, state):
         # Implicit detection of factored mode and single dim tensors.
         return self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"]) if 'exp_avg_sq_row' in state \
             else state['exp_avg_sq'].sqrt()
 
+    @torch.no_grad()
     def initialise_state(self, p, state, slice_p, bf16_state, factored):
         if p.grad is None or len(state) != 0:
             return
 
-        grad = p.grad.data
-        sliced_data = self.get_sliced_tensor(p.data, slice_p)
+        grad = p.grad
+        dtype = torch.bfloat16 if bf16_state else p.dtype
+        sliced_data = self.get_sliced_tensor(p, slice_p)
 
-        state['z'] = p.data.clone().detach()
+        state['z'] = p.detach().clone()
 
         if factored and grad.dim() > 1:
             state["exp_avg_sq_row"] = grad.new_zeros(grad.shape[:-1]).detach()
             state["exp_avg_sq_col"] = grad.new_zeros(grad.shape[:-2] + grad.shape[-1:]).detach()
         else:
-            state['exp_avg_sq'] = torch.zeros_like(p.data).detach()
+            state['exp_avg_sq'] = torch.zeros_like(p).detach()
 
         # If the initial weights are zero, don't bother storing them.
         if p.data.count_nonzero() > 0:
-            if bf16_state:
-                state['p0'] = sliced_data.to(dtype=torch.bfloat16, copy=True).detach()
-            else:
-                state['p0'] = sliced_data.clone().detach()
+            state['p0'] = sliced_data.to(dtype=dtype, copy=True).detach()
         else:
-            state['p0'] = torch.tensor(0.0, device=p.device, dtype=p.dtype)
+            state['p0'] = torch.tensor(0.0, dtype=dtype, device=p.device)
 
-        state['s'] = torch.zeros_like(sliced_data, dtype=torch.bfloat16 if bf16_state else None).detach()
+        state['s'] = torch.zeros_like(sliced_data, dtype=dtype).detach()
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -249,7 +255,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         first_param = self.param_groups[0]['params'][0]
         device = first_param.device
@@ -320,13 +327,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 group['initialised'] = True
 
             for p in active_p:
-                grad = p.grad.data
+                grad = p.grad
                 state = self.state[p]
 
                 s = state['s']
                
                 sliced_grad = self.get_sliced_tensor(grad, slice_p)
-                sliced_data = self.get_sliced_tensor(p.data, slice_p)
+                sliced_data = self.get_sliced_tensor(p, slice_p)
 
                 # Adam EMA updates
                 if factored and grad.dim() > 1:
@@ -382,24 +389,27 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             ckp1 = weight / weight_sum if weight_sum else 0
 
             if foreach:
-                ys, grads, states, zs = zip(*[(p.data, 
-                                               p.grad.data, 
+                ys, grads, states, zs = zip(*[(p,
+                                               p.grad, 
                                                self.state[p], 
-                                               self.state[p]['z']) 
+                                               self.state[p]['z'])
                                                for p in active_p])
                 updates = [
                     grad.mul(d).atan2(self.denom_from_state(state)) 
                     for grad, state in zip(grads, states)
                 ]
 
+                # Weight decay.
                 torch._foreach_add_(updates, ys, alpha=weight_decay)
+
                 torch._foreach_lerp_(ys, zs, ckp1)
                 torch._foreach_add_(ys, updates, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+
                 torch._foreach_sub_(zs, updates, alpha=dlr)
             else:
                 for p in active_p:
-                    y = p.data
-                    grad = p.grad.data
+                    y = p
+                    grad = p.grad
                     state = self.state[p]
 
                     z = state['z']
