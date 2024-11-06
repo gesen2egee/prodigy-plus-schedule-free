@@ -255,7 +255,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 all_params.extend(group['params'])
 
         for group in groups:
-            if self.use_schedulefree and not group['train_mode']:
+            if not group['train_mode']:
                 raise Exception("Not in train mode!")
 
             lr = group['lr']
