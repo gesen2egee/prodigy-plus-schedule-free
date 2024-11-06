@@ -382,7 +382,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 else:
                     denom = state['exp_avg_sq'].sqrt()
 
-                # Adam-atan2. Use atan2 rather than epsilon and division for parameter updates (https://arxiv.org/abs/2407.05872). 
+                # Adam-atan2. Use atan2 rather than epsilon and division 
+                # for parameter updates (https://arxiv.org/abs/2407.05872).
+                # Has the nice property of "clipping" the gradient as well.
                 update = grad.mul(d).atan2(denom)
 
                 # Weight decay.
