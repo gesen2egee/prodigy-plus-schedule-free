@@ -101,6 +101,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
             (default False)
+        amplify_gradients (boolean):
+            Use a non-linear function to normalise gradients for the purposes of computing the learning rate. Can
+            help if Prodigy adapts too slowly, but risks overshooting. (default True)
     """
     def __init__(self, params, lr=1.0,
                  use_schedulefree=True,
@@ -115,7 +118,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  slice_p=11,
                  bf16_state=False,
                  adam_atan2=True,
-                 factored=False):
+                 factored=False,
+                 amplify_gradients=True):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -149,7 +153,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         d_numerator=0.0,
                         bf16_state=bf16_state,
                         adam_atan2=adam_atan2,
-                        factored=factored)
+                        factored=factored,
+                        amplify_gradients=amplify_gradients)
         
         self.d0 = d0
         self.split_groups = split_groups
@@ -216,6 +221,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         # stride = (flattened_tensor.stride(0) * slice_p,)
         # sliced_tensor = torch.as_strided(flattened_tensor, size=(numel,), stride=stride)
         # return sliced_tensor
+
+    def signed_sqrt(self, tensor):
+        return tensor.abs().sqrt_().mul_(tensor.sign())
 
     def initialise_state(self, p, state, slice_p, bf16_state, factored):
         if p.grad is None or len(state) != 0:
@@ -291,6 +299,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             slice_p = group['slice_p']
             factored = group['factored']
+            amplify_gradients = group['amplify_gradients']
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
@@ -329,7 +338,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 state = self.state[p]
 
                 s = state['s']
-
+               
                 sliced_grad = self.get_sliced_tensor(grad, slice_p)
                 sliced_data = self.get_sliced_tensor(p.data, slice_p)
 
@@ -343,10 +352,19 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     state["exp_avg_sq_col"].mul_(beta2).add_(grad_sq.mean(dim=-2), alpha=d * d * (1 - beta2))
                 else:
                     state['exp_avg_sq'].mul_(beta2).addcmul_(grad, grad, value=d * d * (1 - beta2))
+                
+                d_grad = sliced_grad
+                d_step = torch.dot(sliced_grad, state['p0'] - sliced_data)
+                
+                # For adaptation only, amplify small gradients and slow down large ones.
+                # Helps d not get stuck on a low learning rate with troublesome gradients.
+                if amplify_gradients:
+                    d_step = self.signed_sqrt(d_step)
+                    d_grad = self.signed_sqrt(sliced_grad)
 
-                d_numerator_accum.add_(torch.dot(sliced_grad, state['p0'] - sliced_data), alpha=d_update)
+                d_numerator_accum.add_(d_step, alpha=d_update)
 
-                s.mul_(beta3).add_(sliced_grad, alpha=d_update)
+                s.mul_(beta3).add_(d_grad, alpha=d_update)
                 d_denom.add_(s.abs().sum())
 
             # Materialise final values off-device once we're done.
