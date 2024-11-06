@@ -95,6 +95,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         amplify_gradients (boolean):
             Use a non-linear function to normalise gradients for the purposes of computing the learning rate. Can
             help if Prodigy adapts too slowly, but risks overshooting. (default True)
+        foreach (boolean):
+            Use the partial foreach implementation for improved performance, but higher peak memory usage. Enabled
+            if foreach is supported, otherwise False.
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -107,7 +110,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  slice_p=11,
                  bf16_state=False,
                  factored=False,
-                 amplify_gradients=True):
+                 amplify_gradients=True,
+                 foreach=hasattr(torch, "_foreach_mul_")):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -140,7 +144,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         d_numerator=0.0,
                         bf16_state=bf16_state,
                         factored=factored,
-                        amplify_gradients=amplify_gradients)
+                        amplify_gradients=amplify_gradients,
+                        foreach=foreach)
         
         self.d0 = d0
         self.split_groups = split_groups
@@ -275,6 +280,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             slice_p = group['slice_p']
             factored = group['factored']
             amplify_gradients = group['amplify_gradients']
+            foreach = group['foreach']
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
@@ -370,30 +376,53 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             ckp1 = weight / weight_sum if weight_sum else 0
 
-            for p in active_p:
-                y = p.data
-                grad = p.grad.data
-                state = self.state[p]
+            if foreach:
+                ys, grads, zs = zip(*[(p.data, p.grad.data, self.state[p]['z']) for p in active_p])
+                denoms = []
 
-                z = state['z']
-
-                if factored and grad.dim() > 1:
-                    denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
+                if factored:
+                    # Slow path for factored version.
+                    denoms = [
+                        self.approx_sqrt(self.state[p]["exp_avg_sq_row"], self.state[p]["exp_avg_sq_col"])
+                        if p.grad.data.dim() > 1 else self.state[p]['exp_avg_sq'].sqrt()
+                        for p in active_p
+                    ]
                 else:
-                    denom = state['exp_avg_sq'].sqrt()
+                    exp_avg_sq = [self.state[p]['exp_avg_sq'] for p in active_p]
+                    denoms = torch._foreach_sqrt(exp_avg_sq)
 
-                # Adam-atan2. Use atan2 rather than epsilon and division 
-                # for parameter updates (https://arxiv.org/abs/2407.05872).
-                # Has the nice property of "clipping" the gradient as well.
-                update = grad.mul(d).atan2(denom)
+                # No foreach_atan2, so slow path here.
+                updates = [g.mul(d).atan2(denom) for g, denom in zip(grads, denoms)]
 
-                # Weight decay.
-                update.add_(y, alpha=weight_decay)
+                torch._foreach_add_(updates, ys, alpha=weight_decay)
+                torch._foreach_lerp_(ys, zs, ckp1)
+                torch._foreach_add_(ys, updates, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+                torch._foreach_sub_(zs, updates, alpha=dlr)
+            else:
+                for p in active_p:
+                    y = p.data
+                    grad = p.grad.data
+                    state = self.state[p]
 
-                y.lerp_(end=z, weight=ckp1)
-                y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+                    z = state['z']
 
-                z.sub_(update, alpha=dlr)
+                    if factored and grad.dim() > 1:
+                        denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
+                    else:
+                        denom = state['exp_avg_sq'].sqrt()
+
+                    # Adam-atan2. Use atan2 rather than epsilon and division 
+                    # for parameter updates (https://arxiv.org/abs/2407.05872).
+                    # Has the nice property of "clipping" the gradient as well.
+                    update = grad.mul(d).atan2(denom)
+
+                    # Weight decay.
+                    update.add_(y, alpha=weight_decay)
+
+                    y.lerp_(end=z, weight=ckp1)
+                    y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+
+                    z.sub_(update, alpha=dlr)
 
             group['k'] = k
 
