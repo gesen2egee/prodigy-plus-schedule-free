@@ -227,7 +227,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             return
 
         grad = p.grad
-        dtype = torch.bfloat16 if bf16_state else p.dtype
+        dtype = torch.bfloat16 if bf16_state and p.dtype is torch.float32 else p.dtype
         sliced_data = self.get_sliced_tensor(p, slice_p)
 
         state['z'] = p.detach().clone()
