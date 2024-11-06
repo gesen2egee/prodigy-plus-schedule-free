@@ -187,9 +187,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         return True
     
     @torch.no_grad()
-    def approx_sqrt(self, row, col):
-        r_factor = (row / row.mean(dim=-1, keepdim=True)).sqrt_().unsqueeze(-1)
-        c_factor = col.unsqueeze(-2).sqrt()
+    def approx_sqrt(self, row, col, bias_correction):
+        r_factor = (row / row.mean(dim=-1, keepdim=True)).div(bias_correction).sqrt_().unsqueeze(-1)
+        c_factor = col.unsqueeze(-2).div(bias_correction).sqrt_()
         return torch.mul(r_factor, c_factor)
 
     @torch.no_grad()
@@ -215,10 +215,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         return tensor.abs().sqrt_().mul_(tensor.sign())
 
     @torch.no_grad()
-    def denom_from_state(self, state):
+    def denom_from_state(self, state, bias_correction):
         # Implicit detection of factored mode and single dim tensors.
-        return self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"]) if 'exp_avg_sq_row' in state \
-            else state['exp_avg_sq'].sqrt()
+        if 'exp_avg_sq_row' in state:
+            return self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"], bias_correction)
+        return state['exp_avg_sq'].div(bias_correction).sqrt_()
 
     @torch.no_grad()
     def initialise_state(self, p, state, slice_p, bf16_state, factored):
@@ -300,12 +301,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if beta4 is None:
                 beta4 = beta2
 
-            if group['use_bias_correction']:
-                bias_correction = ((1 - beta2 ** k) ** 0.5) / (1 - beta1 ** k)
-            else:
-                bias_correction = 1
-
-            dlr = d * lr * bias_correction
+            dlr = d * lr
             d_update = dlr * (1 - beta3)
 
             # Apply warmup separate to the denom and numerator updates.
@@ -388,6 +384,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             ckp1 = weight / weight_sum if weight_sum else 0
 
+            bias_correction = 1 - beta2 ** k if group['use_bias_correction'] else 1
+
             if foreach:
                 ys, grads, states, zs = zip(*[(p,
                                                p.grad, 
@@ -395,7 +393,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                                                self.state[p]['z'])
                                                for p in active_p])
                 updates = [
-                    grad.mul(d).atan2(self.denom_from_state(state)) 
+                    grad.mul(d).atan2(self.denom_from_state(state, bias_correction)) 
                     for grad, state in zip(grads, states)
                 ]
 
@@ -414,15 +412,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
                     z = state['z']
 
-                    if factored and grad.dim() > 1:
-                        denom = self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
-                    else:
-                        denom = state['exp_avg_sq'].sqrt()
-
                     # Adam-atan2. Use atan2 rather than epsilon and division 
                     # for parameter updates (https://arxiv.org/abs/2407.05872).
                     # Has the nice property of "clipping" the gradient as well.
-                    update = grad.mul(d).atan2(denom)
+                    update = grad.mul(d).atan2(self.denom_from_state(state, bias_correction))
 
                     # Weight decay.
                     update.add_(y, alpha=weight_decay)
