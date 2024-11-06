@@ -209,6 +209,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     def signed_sqrt(self, tensor):
         return tensor.abs().sqrt_().mul_(tensor.sign())
 
+    def denom_from_state(self, state):
+        # Implicit detection of factored mode and single dim tensors.
+        return self.approx_sqrt(state["exp_avg_sq_row"], state["exp_avg_sq_col"]) if 'exp_avg_sq_row' in state \
+            else state['exp_avg_sq'].sqrt()
+
     def initialise_state(self, p, state, slice_p, bf16_state, factored):
         if p.grad is None or len(state) != 0:
             return
@@ -377,22 +382,15 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             ckp1 = weight / weight_sum if weight_sum else 0
 
             if foreach:
-                ys, grads, zs = zip(*[(p.data, p.grad.data, self.state[p]['z']) for p in active_p])
-                denoms = []
-
-                if factored:
-                    # Slow path for factored version.
-                    denoms = [
-                        self.approx_sqrt(self.state[p]["exp_avg_sq_row"], self.state[p]["exp_avg_sq_col"])
-                        if p.grad.data.dim() > 1 else self.state[p]['exp_avg_sq'].sqrt()
-                        for p in active_p
-                    ]
-                else:
-                    exp_avg_sq = [self.state[p]['exp_avg_sq'] for p in active_p]
-                    denoms = torch._foreach_sqrt(exp_avg_sq)
-
-                # No foreach_atan2, so slow path here.
-                updates = [g.mul(d).atan2(denom) for g, denom in zip(grads, denoms)]
+                ys, grads, states, zs = zip(*[(p.data, 
+                                               p.grad.data, 
+                                               self.state[p], 
+                                               self.state[p]['z']) 
+                                               for p in active_p])
+                updates = [
+                    grad.mul(d).atan2(self.denom_from_state(state)) 
+                    for grad, state in zip(grads, states)
+                ]
 
                 torch._foreach_add_(updates, ys, alpha=weight_decay)
                 torch._foreach_lerp_(ys, zs, ckp1)
