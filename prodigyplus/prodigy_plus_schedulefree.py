@@ -195,20 +195,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @torch.no_grad()
     def get_sliced_tensor(self, tensor, slice_p):
         # Downsample the tensor by using only a portion of parameters.
-        flat_tensor = tensor.ravel()
+        tensor = tensor.ravel()
 
-        if slice_p is None or slice_p <= 1:
-            return flat_tensor
+        if not slice_p or slice_p <= 1:
+            return tensor
 
-        return flat_tensor[::slice_p]
-
-        # # Memory efficient version but less safe. Rather
-        # # than flatten and slice, we just change the view of the tensor.
-        # flattened_tensor = tensor.ravel()
-        # numel = flattened_tensor.numel() // slice_p
-        # stride = (flattened_tensor.stride(0) * slice_p,)
-        # sliced_tensor = torch.as_strided(flattened_tensor, size=(numel,), stride=stride)
-        # return sliced_tensor
+        return tensor[::slice_p]
 
     @torch.no_grad()
     def signed_sqrt(self, tensor):
