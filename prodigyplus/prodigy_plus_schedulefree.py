@@ -298,7 +298,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             # Apply warmup separate to the denom and numerator updates.
             if k < warmup_steps:
-                dlr *= (k / warmup_steps) ** 2
+                dlr *= k / warmup_steps
 
             d_numerator *= beta3
 
