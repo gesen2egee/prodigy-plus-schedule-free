@@ -111,7 +111,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  bf16_state=True,
                  factored=False,
                  amplify_gradients=True,
-                 foreach=hasattr(torch, "_foreach_mul_")):
+                 foreach=hasattr(torch, '_foreach_mul_')):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -161,7 +161,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 for p in group['params']:
                     state = self.state[p]
                     if 'z' in state:
-                        # Set p.data to x
+                        # Set p to x
                         p.lerp_(end=state['z'].to(device=p.device), weight=1-1/beta1)
                 group['train_mode'] = False
 
@@ -174,7 +174,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 for p in group['params']:
                     state = self.state[p]
                     if 'z' in state:
-                        # Set p.data to y
+                        # Set p to y
                         p.lerp_(end=state['z'].to(device=p.device), weight=1-beta1)
                 group['train_mode'] = True
 
@@ -233,8 +233,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         state['z'] = p.detach().clone()
 
         if factored and grad.dim() > 1:
-            state["exp_avg_sq_row"] = grad.new_zeros(grad.shape[:-1]).detach()
-            state["exp_avg_sq_col"] = grad.new_zeros(grad.shape[:-2] + grad.shape[-1:]).detach()
+            state['exp_avg_sq_row'] = grad.new_zeros(grad.shape[:-1]).detach()
+            state['exp_avg_sq_col'] = grad.new_zeros(grad.shape[:-2] + grad.shape[-1:]).detach()
         else:
             state['exp_avg_sq'] = torch.zeros_like(p).detach()
 
@@ -336,6 +336,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     grad_sq = grad.square().add_(1e-30)
                     state["exp_avg_sq_row"].mul_(beta2).add_(grad_sq.mean(dim=-1), alpha=d * d * (1 - beta2))
                     state["exp_avg_sq_col"].mul_(beta2).add_(grad_sq.mean(dim=-2), alpha=d * d * (1 - beta2))
+                    state['exp_avg_sq_row'].mul_(beta2).add_(grad_sq.mean(dim=-1), alpha=d * d * (1 - beta2))
+                    state['exp_avg_sq_col'].mul_(beta2).add_(grad_sq.mean(dim=-2), alpha=d * d * (1 - beta2))
                 else:
                     state['exp_avg_sq'].mul_(beta2).addcmul_(grad, grad, value=d * d * (1 - beta2))
                 
