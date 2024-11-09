@@ -187,8 +187,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         return True
     
     @torch.no_grad()
-    def approx_sqrt(self, row, col):
-        r_factor = row.div(row.mean(dim=-1, keepdim=True).clip_(1e-30)).sqrt_().unsqueeze(-1)
+    def approx_sqrt(self, row, col, eps):
+        r_factor = row.div(row.mean(dim=-1, keepdim=True).clip_(min=eps)).sqrt_().unsqueeze(-1)
         c_factor = col.unsqueeze(-2).sqrt()
         return torch.mul(r_factor, c_factor)
 
@@ -207,10 +207,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         return tensor.abs().sqrt_().mul_(tensor.sign())
     
     @torch.no_grad()
-    def denom_from_state(self, state):
+    def denom_from_state(self, state, eps):
         # Implicit detection of factored mode and single dim tensors.
         if 'exp_avg_sq_row' in state:
-            return self.approx_sqrt(state['exp_avg_sq_row'], state['exp_avg_sq_col'])
+            return self.approx_sqrt(state['exp_avg_sq_row'], state['exp_avg_sq_col'], eps)
         return state['exp_avg_sq'].sqrt()
     
     @torch.no_grad()
@@ -253,6 +253,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         first_param = self.param_groups[0]['params'][0]
         device = first_param.device
+        eps = torch.finfo(first_param.dtype).eps
 
         if self.split_groups:
             groups = self.param_groups
@@ -384,7 +385,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             if foreach:
                 ys, zs, updates = zip(*[(p, self.state[p]['z'],
-                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p])).mul_(a))
+                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p], eps)).mul_(a))
                                         for p in active_p])
                 
                 # Weight decay.
@@ -405,7 +406,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     # Adam-atan2. Use atan2 rather than epsilon and division 
                     # for parameter updates (https://arxiv.org/abs/2407.05872).
                     # Has the nice property of "clipping" the gradient as well.
-                    update = grad.mul_(d).atan2_(self.denom_from_state(state)).mul_(a)
+                    update = grad.mul_(d).atan2_(self.denom_from_state(state, eps)).mul_(a)
 
                     # Weight decay.
                     update.add_(y, alpha=weight_decay)
