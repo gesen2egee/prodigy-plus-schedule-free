@@ -186,11 +186,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     def supports_flat_params(self):
         return True
     
-    @torch.no_grad()
-    def approx_sqrt(self, row, col, eps):
-        r_factor = row.div(row.mean(dim=-1, keepdim=True).clip_(min=eps)).sqrt_().unsqueeze(-1)
-        c_factor = col.unsqueeze(-2).sqrt()
-        return torch.mul(r_factor, c_factor)
 
     @torch.no_grad()
     def get_sliced_tensor(self, tensor, slice_p):
@@ -210,7 +205,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     def denom_from_state(self, state, eps):
         # Implicit detection of factored mode and single dim tensors.
         if 'exp_avg_sq_row' in state:
-            return self.approx_sqrt(state['exp_avg_sq_row'], state['exp_avg_sq_col'], eps)
+            row, col = state['exp_avg_sq_row'], state['exp_avg_sq_col']
+            r_factor = row.div(row.mean(dim=-1, keepdim=True).clamp_min_(eps)).sqrt_().unsqueeze(-1)
+            c_factor = col.sqrt().unsqueeze(-2)
+            return r_factor * c_factor
         return state['exp_avg_sq'].sqrt()
     
     @torch.no_grad()
