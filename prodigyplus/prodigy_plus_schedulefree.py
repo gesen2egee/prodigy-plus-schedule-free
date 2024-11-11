@@ -103,8 +103,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  prodigy_steps=0,
                  warmup_steps=0,
                  split_groups=True,
-                 factored=False,
                  split_groups_mean="harmonic_mean",
+                 factored=True,
                  foreach=False):
         
         if not 0.0 < d0:
