@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.optim
+from statistics import mean, harmonic_mean, geometric_mean
 
 class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     r"""
@@ -82,12 +83,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
             Set to False for original Prodigy behaviour, where all groups share the same values.
             (default True)
+        split_groups_mean (str: None, "mean", "harmonic_mean", "geometric_mean"):
+            When split_groups is True, use specified mean of learning rates for all groups. This favours
+            a more conservative LR. Calculation remains per-group. If split_groups is False, this value has no effect.
+            Set to None to have each group use its own learning rate calculation. 
+            (default "harmonic_mean")
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
-            (default False)
-        amplify_gradients (boolean):
-            Use a non-linear function to normalise gradients for the purposes of computing the learning rate. Can
-            help if Prodigy adapts too slowly, but risks overshooting. (default True)
+            (default True)
         foreach (boolean):
             Use the partial foreach implementation for improved performance. Can be slower in low memory situations.
             (default False)
@@ -101,8 +104,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  warmup_steps=0,
                  split_groups=True,
                  factored=False,
-                 amplify_gradients=True,
-                 foreach=hasattr(torch, '_foreach_mul_')):
+                 split_groups_mean="harmonic_mean",
                  foreach=False):
         
         if not 0.0 < d0:
@@ -117,6 +119,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
         if beta4 is not None and not 0.0 <= beta4 < 1.0:
             raise ValueError("Invalid beta4 parameter: {}".format(beta4))
+        if split_groups_mean not in {None, "mean", "harmonic_mean", "geometric_mean"}:
+            raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         weight_decay=weight_decay,
@@ -124,7 +128,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         k=0,initialised=None,
                         train_mode=True,
                         weight_sum=0,
-                        split_groups=split_groups,
                         prodigy_steps=prodigy_steps,
                         warmup_steps=warmup_steps,
                         beta4=beta4,
@@ -132,11 +135,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored,
-                        amplify_gradients=amplify_gradients,
                         foreach=foreach)
         
         self.d0 = d0
         self.split_groups = split_groups
+        self.split_groups_mean = split_groups_mean
 
         super().__init__(params, defaults)
 
@@ -150,7 +153,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     state = self.state[p]
                     if 'z' in state:
                         # Set p to x
-                        p.lerp_(end=state['z'].to(device=p.device), weight=1-1/beta1)
+                        p.lerp_(end=state['z'].to(device=p.device), weight=1 - 1 / beta1)
                 group['train_mode'] = False
 
     @torch.no_grad()
@@ -163,7 +166,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     state = self.state[p]
                     if 'z' in state:
                         # Set p to y
-                        p.lerp_(end=state['z'].to(device=p.device), weight=1-beta1)
+                        p.lerp_(end=state['z'].to(device=p.device), weight=1 - beta1)
                 group['train_mode'] = True
 
     @property
@@ -177,10 +180,20 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @torch.no_grad()
     def get_sliced_tensor(self, tensor, slice_p=11):
         return tensor.ravel()[::slice_p]
+   
     @torch.no_grad()
-    def signed_sqrt(self, tensor):
-        return tensor.abs().sqrt_().mul_(tensor.sign())
-    
+    def get_d_mean(self, groups, mode):
+        if mode is None:
+            return None
+        elif mode == "harmonic_mean":
+            return harmonic_mean(group['d'] for group in groups)
+        elif mode == "geometric_mean":
+            return geometric_mean(group['d'] for group in groups)
+        elif mode == "mean":
+            return mean(group['d'] for group in groups)
+        
+        raise ValueError(f"Invalid value for split_groups_mean: '{mode}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
+
     @torch.no_grad()
     def denom_from_state(self, state, eps):
         # Implicit detection of factored mode and single dim tensors.
@@ -236,12 +249,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         if self.split_groups:
             groups = self.param_groups
             all_params = None
+            d_mean = self.get_d_mean(groups, self.split_groups_mean)
         else:
             # Emulate original Prodigy implementation.
             groups = [self.param_groups[0]]
             all_params = []
             for group in self.param_groups:
                 all_params.extend(group['params'])
+            d_mean = None
 
         for group in groups:
             if not group['train_mode']:
@@ -262,7 +277,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_numerator = group['d_numerator']
 
             factored = group['factored']
-            amplify_gradients = group['amplify_gradients']
             foreach = group['foreach']
 
             if beta3 is None:
@@ -271,7 +285,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if beta4 is None:
                 beta4 = -beta2
 
-            dlr = d * lr
+            dlr = (d if d_mean is None else d_mean) * lr
             d_update = dlr * (1 - beta3)
 
             # Apply warmup separate to the denom and numerator updates.
@@ -304,23 +318,19 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
                 sliced_grad = self.get_sliced_tensor(grad)
                 sliced_data = self.get_sliced_tensor(p)
+                
                 # Adam EMA updates
-                if factored and grad.dim() > 1:
+                if 'exp_avg_sq_row' in state:
                     grad_sq = grad.square()
                     state['exp_avg_sq_row'].mul_(beta2).add_(grad_sq.mean(dim=-1), alpha=d * d * (1 - beta2))
                     state['exp_avg_sq_col'].mul_(beta2).add_(grad_sq.mean(dim=-2), alpha=d * d * (1 - beta2))
+                    del grad_sq
                 else:
                     state['exp_avg_sq'].mul_(beta2).addcmul_(grad, grad, value=d * d * (1 - beta2))
-                
-                d_numerator_step = torch.dot(sliced_grad, state['p0'] - sliced_data)
 
-                # For adaptation only, amplify small gradients and slow down large ones.
-                # Helps d not get stuck on a low learning rate with troublesome gradients.
-                if amplify_gradients:
-                    d_numerator_step = self.signed_sqrt(d_numerator_step)
-                    sliced_grad = self.signed_sqrt(sliced_grad)
-
-                d_numerator_accum.add_(d_numerator_step, alpha=d_update)
+                x0_minus = state['p0'] - sliced_data
+                d_numerator_accum.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+                del x0_minus
 
                 s.mul_(beta3).add_(sliced_grad, alpha=d_update)
                 d_denom.add_(s.abs().sum())
