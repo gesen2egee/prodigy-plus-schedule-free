@@ -292,7 +292,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 beta3 = beta2 ** 0.5
 
             if beta4 is None:
-                beta4 = beta2
+                beta4 = -beta2
 
             dlr = d * lr
             d_update = dlr * (1 - beta3)
