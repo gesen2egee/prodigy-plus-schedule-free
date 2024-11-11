@@ -381,11 +381,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             ckp1 = weight / weight_sum if weight_sum else 0
 
-            a = 4 / math.pi
-
             if foreach:
                 ys, zs, updates = zip(*[(p, self.state[p]['z'],
-                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p], eps)).mul_(a))
+                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p], eps)))
                                         for p in active_p])
                 
                 # Weight decay.
@@ -395,6 +393,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 torch._foreach_add_(ys, updates, alpha=dlr * (beta1 * (1 - ckp1) - 1))
 
                 torch._foreach_sub_(zs, updates, alpha=dlr)
+                del updates
             else:
                 for p in active_p:
                     y = p
@@ -406,7 +405,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     # Adam-atan2. Use atan2 rather than epsilon and division 
                     # for parameter updates (https://arxiv.org/abs/2407.05872).
                     # Has the nice property of "clipping" the gradient as well.
-                    update = grad.mul_(d).atan2_(self.denom_from_state(state, eps)).mul_(a)
+                    denom = self.denom_from_state(state, eps)
+                    update = grad.mul_(d).atan2_(denom)
 
                     # Weight decay.
                     update.add_(y, alpha=weight_decay)
@@ -415,6 +415,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
 
                     z.sub_(update, alpha=dlr)
+                    del update, denom
 
             group['k'] = k
 
