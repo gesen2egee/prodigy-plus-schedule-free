@@ -224,7 +224,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         state['z'] = p.detach().clone()
 
-        if factored and grad.dim() > 1:
+        if factored and grad.dim() == 2:
             state['exp_avg_sq_row'] = grad.new_zeros(grad.shape[:-1]).detach()
             state['exp_avg_sq_col'] = grad.new_zeros(grad.shape[:-2] + grad.shape[-1:]).detach()
         else:
