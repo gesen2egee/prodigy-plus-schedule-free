@@ -89,8 +89,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Use a non-linear function to normalise gradients for the purposes of computing the learning rate. Can
             help if Prodigy adapts too slowly, but risks overshooting. (default True)
         foreach (boolean):
-            Use the partial foreach implementation for improved performance, but higher peak memory usage. Enabled
-            if foreach is supported, otherwise False.
+            Use the partial foreach implementation for improved performance. Can be slower in low memory situations.
+            (default False)
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -103,6 +103,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  factored=False,
                  amplify_gradients=True,
                  foreach=hasattr(torch, '_foreach_mul_')):
+                 foreach=False):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
