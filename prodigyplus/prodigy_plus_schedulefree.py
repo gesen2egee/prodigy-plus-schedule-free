@@ -82,10 +82,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
             Set to False for original Prodigy behaviour, where all groups share the same values.
             (default True)
-        slice_p (int):
-            Downsamples p0 and s state variables by storing only every nth element. 
-            Significantly reduces state memory with a negligble impact on adaptive step size predictions. 
-            Higher values reduce memory usage, but have a greater impact on predicition accuracy (default 11).
         bf16_state (boolean):
             Stores p0 and s state variables in bfloat16. Only relevant if training in float32.
             Can save additional memory, but has much less impact when using slice_p (default True).
@@ -107,7 +103,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  prodigy_steps=0,
                  warmup_steps=0,
                  split_groups=True,
-                 slice_p=11,
                  bf16_state=True,
                  factored=False,
                  amplify_gradients=True,
@@ -125,15 +120,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
         if beta4 is not None and not 0.0 <= beta4 < 1.0:
             raise ValueError("Invalid beta4 parameter: {}".format(beta4))
-        if slice_p is not None and slice_p < 1:
-            raise ValueError("Invalid slice_p parameter: {}".format(slice_p))
 
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
                         k=0,initialised=None,
                         train_mode=True,
-                        slice_p=slice_p,
                         weight_sum=0,
                         split_groups=split_groups,
                         prodigy_steps=prodigy_steps,
@@ -185,18 +177,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @property
     def supports_flat_params(self):
         return True
-    
 
     @torch.no_grad()
-    def get_sliced_tensor(self, tensor, slice_p):
-        # Downsample the tensor by using only a portion of parameters.
-        tensor = tensor.ravel()
-
-        if not slice_p or slice_p <= 1:
-            return tensor
-
-        return tensor[::slice_p]
-
+    def get_sliced_tensor(self, tensor, slice_p=11):
+        return tensor.ravel()[::slice_p]
     @torch.no_grad()
     def signed_sqrt(self, tensor):
         return tensor.abs().sqrt_().mul_(tensor.sign())
@@ -218,7 +202,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         grad = p.grad
         dtype = torch.bfloat16 if bf16_state and p.dtype is torch.float32 else p.dtype
-        sliced_data = self.get_sliced_tensor(p, slice_p)
+        sliced_data = self.get_sliced_tensor(p)
 
         state['z'] = p.detach().clone()
 
@@ -281,7 +265,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_coef = group['d_coef']
             d_numerator = group['d_numerator']
 
-            slice_p = group['slice_p']
             factored = group['factored']
             amplify_gradients = group['amplify_gradients']
             foreach = group['foreach']
@@ -323,10 +306,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 state = self.state[p]
 
                 s = state['s']
-               
-                sliced_grad = self.get_sliced_tensor(grad, slice_p)
-                sliced_data = self.get_sliced_tensor(p, slice_p)
 
+                sliced_grad = self.get_sliced_tensor(grad)
+                sliced_data = self.get_sliced_tensor(p)
                 # Adam EMA updates
                 if factored and grad.dim() > 1:
                     grad_sq = grad.square()
