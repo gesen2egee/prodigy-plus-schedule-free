@@ -50,11 +50,3 @@ Set split_groups to False to mimic Prodigy's normal behaviour, which uses a sing
 
 In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
 can be controlled via the prodigy_steps settings.
-
-An experimental feature, `amplify_gradients` (on by default) applies a signed sqrt to the numerator and denominator calculations,
-which can help Prodigy get to a good learning rate, even when gradients are poor. Below are two SDXL LoRA training runs, showing from left to right 
-the value of `d` for the first and second text encoders, and the Unet. Orange is with the feature disabled, green with it enabled. 
-
-While it doesn't entirely fix the issue, the Unet LR is significantly better, and the other LRs are within the same ballpark.
-
-![image](https://github.com/user-attachments/assets/6e790d58-a749-4df8-82e7-87789fd96e1a)
