@@ -82,9 +82,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
             Set to False for original Prodigy behaviour, where all groups share the same values.
             (default True)
-        bf16_state (boolean):
-            Stores p0 and s state variables in bfloat16. Only relevant if training in float32.
-            Can save additional memory, but has much less impact when using slice_p (default True).
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
             (default False)
@@ -103,7 +100,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  prodigy_steps=0,
                  warmup_steps=0,
                  split_groups=True,
-                 bf16_state=True,
                  factored=False,
                  amplify_gradients=True,
                  foreach=hasattr(torch, '_foreach_mul_')):
@@ -134,7 +130,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
-                        bf16_state=bf16_state,
                         factored=factored,
                         amplify_gradients=amplify_gradients,
                         foreach=foreach)
@@ -196,7 +191,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         return state['exp_avg_sq'].sqrt()
     
     @torch.no_grad()
-    def initialise_state(self, p, state, slice_p, bf16_state, factored):
+    def initialise_state(self, p, state, factored, bf16_state=True):
         if p.grad is None or len(state) != 0:
             return
 
@@ -204,25 +199,25 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         dtype = torch.bfloat16 if bf16_state and p.dtype is torch.float32 else p.dtype
         sliced_data = self.get_sliced_tensor(p)
 
-        state['z'] = p.detach().clone()
+        state['z'] = p.detach().clone(memory_format=torch.preserve_format)
 
         if factored and grad.dim() == 2:
             state['exp_avg_sq_row'] = grad.new_zeros(grad.shape[:-1]).detach()
             state['exp_avg_sq_col'] = grad.new_zeros(grad.shape[:-2] + grad.shape[-1:]).detach()
         else:
-            state['exp_avg_sq'] = torch.zeros_like(p).detach()
-
+            state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
+        
         # If the initial weights are zero, don't bother storing them.
         if p.data.count_nonzero() > 0:
-            state['p0'] = sliced_data.to(dtype=dtype, copy=True).detach()
+            state['p0'] = sliced_data.to(dtype=dtype, memory_format=torch.preserve_format, copy=True).detach()
         else:
             state['p0'] = torch.tensor(0.0, dtype=dtype, device=p.device)
-
-        state['s'] = torch.zeros_like(sliced_data, dtype=dtype).detach()
+        
+        state['s'] = torch.zeros_like(sliced_data, memory_format=torch.preserve_format, dtype=dtype).detach()
 
     @torch.no_grad()
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Performs a single optimisation step.
 
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
@@ -297,7 +292,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             if group['initialised'] is None:
                 for p in active_p:
-                    self.initialise_state(p, self.state[p], slice_p, group['bf16_state'], factored)
+                    self.initialise_state(p, self.state[p], factored)
                 group['initialised'] = True
 
             for p in active_p:
