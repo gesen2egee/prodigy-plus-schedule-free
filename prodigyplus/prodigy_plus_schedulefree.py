@@ -334,8 +334,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_numerator_accum = torch.tensor(0.0, dtype=torch.float32, device=device)
             d_denom = torch.tensor(0.0, dtype=torch.float32, device=device)
 
+            # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
             if factored:
-                # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
                 beta2 = min(1 - k ** -0.8, beta2)
 
             # Bias correction.
@@ -366,11 +366,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 # Adam EMA updates
                 if len(exp_avg_sq) == 4:
                     row_var, col_var, dr, dc = exp_avg_sq
-
-                    row_mean = (torch.norm(grad, dim=dr, keepdim=True).square_().div_(grad.size(-1)))
+                    # From: https://github.com/pytorch/pytorch/blob/main/torch/optim/_adafactor.py. Avoids grad.square().
+                    row_mean = grad.norm(dim=dr, keepdim=True).square_().mul_(1 / float(grad.shape[dr]))
                     row_var.mul_(beta2).add_(row_mean, alpha=one_minus_beta2_d)
 
-                    col_mean = (torch.norm(grad, dim=dc, keepdim=True).square_().div_(grad.size(-2)))
+                    col_mean = grad.norm(dim=dc, keepdim=True).square_().mul_(1 / float(grad.shape[dc]))
                     col_var.mul_(beta2).add_(col_mean, alpha=one_minus_beta2_d)
                 else:
                     exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
