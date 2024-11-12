@@ -25,7 +25,7 @@ calls to `train()` and `eval()`. See the schedule-free documentation for more de
 If you do use another scheduler, linear or cosine is preferred, as a restarting scheduler can confuse Prodigy's adaptation logic.
 
 Do not use with gradient clipping, as this can hamper the ability for the optimiser to adapt. Scaling of large gradients is 
-already handled by Adam-atan2, which naturally bounds the updates to \((- \pi, \pi]\).
+already handled by Adam-atan2, which naturally bounds the updates to $(-\pi, \pi] $.
 
 Setting `beta4` to None or a positive value will treat the stepsize as a running average, and allow the stepsize to 
 both decrease and increase over time as the loss landscape changes. This is contrary to Prodigy's default behaviour, which never decreases the stepsize.
