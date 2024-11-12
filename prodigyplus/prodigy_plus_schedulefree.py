@@ -212,9 +212,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         """
         if not factored or len(shape) < 2:
             return None
-        sorted_dims = sorted(((x, i) for i, x in enumerate(shape)))
-        if shape[sorted_dims[-2][1]] < min_dim_size_to_factor:
+        if all(dim < min_dim_size_to_factor for dim in shape):
             return None
+        sorted_dims = sorted(((x, i) for i, x in enumerate(shape)))
         return int(sorted_dims[-2][1]), int(sorted_dims[-1][1])
 
     @torch.no_grad()
@@ -241,12 +241,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         state['z'] = p.detach().clone(memory_format=torch.preserve_format)
 
-        # Set min dim size to 0, otherwise this will never work for most LoRAs,
-        # which tend to be 8-32 ranks.
         factored_dims = self.factored_dims(
             grad.shape,
             factored=factored,
-            min_dim_size_to_factor=0
+            min_dim_size_to_factor=32
         )
 
         if factored_dims is not None:
