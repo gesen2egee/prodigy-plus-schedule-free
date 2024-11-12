@@ -1,5 +1,6 @@
 # Prodigy + ScheduleFree
-*Eliminating hyperparameters, one variable at a time.**
+*Eliminating hyperparameters, one commit at a time.*
+
 **Current status:** Experimental
 
 ## Details
