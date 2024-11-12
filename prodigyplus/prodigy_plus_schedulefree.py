@@ -194,15 +194,41 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         
         raise ValueError(f"Invalid value for split_groups_mean: '{mode}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
+    # From: https://github.com/huggingface/pytorch-image-models/pull/2320
     @torch.no_grad()
-    def denom_from_state(self, state, eps):
+    def factored_dims(self,
+        shape,
+        factored,
+        min_dim_size_to_factor):
+        r"""Whether to use a factored second moment estimator.
+        This function returns a tuple with the two largest axes to reduce over.
+        If no two dimensions have size >= min_dim_size_to_factor, return None.
+        Args:
+        shape: an input shape
+        factored: whether to use factored second-moment estimator for > 2d vars.
+        min_dim_size_to_factor: only factor accumulator if two array dimensions have at least this size.
+        Returns:
+        None or a tuple of ints
+        """
+        if not factored or len(shape) < 2:
+            return None
+        sorted_dims = sorted(((x, i) for i, x in enumerate(shape)))
+        if shape[sorted_dims[-2][1]] < min_dim_size_to_factor:
+            return None
+        return int(sorted_dims[-2][1]), int(sorted_dims[-1][1])
+
+    @torch.no_grad()
+    def denom_from_state(self, exp_avg_sq):
         # Implicit detection of factored mode and single dim tensors.
-        if 'exp_avg_sq_row' in state:
-            row, col = state['exp_avg_sq_row'], state['exp_avg_sq_col']
-            r_factor = row.div(row.mean(dim=-1, keepdim=True).clamp_min_(eps)).sqrt_().unsqueeze(-1)
-            c_factor = col.sqrt().unsqueeze(-2)
-            return r_factor * c_factor
-        return state['exp_avg_sq'].sqrt()
+        if len(exp_avg_sq) == 4:
+            row_var, col_var, dr, dc = exp_avg_sq
+            eps = 1e-7 if row_var.dtype == torch.float16 or row_var.dtype == torch.bfloat16 else 1e-30
+            
+            reduce_dc = dc - 1 if dc > dr else dc
+            row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True).clamp_min_(eps)
+            return row_var.div(row_col_mean).sqrt_() * col_var.sqrt()
+
+        return exp_avg_sq[0].sqrt()
     
     @torch.no_grad()
     def initialise_state(self, p, state, factored, bf16_state=True):
@@ -215,11 +241,24 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         state['z'] = p.detach().clone(memory_format=torch.preserve_format)
 
-        if factored and grad.dim() == 2:
-            state['exp_avg_sq_row'] = grad.new_zeros(grad.shape[:-1]).detach()
-            state['exp_avg_sq_col'] = grad.new_zeros(grad.shape[:-2] + grad.shape[-1:]).detach()
+        # Set min dim size to 0, otherwise this will never work for most LoRAs,
+        # which tend to be 8-32 ranks.
+        factored_dims = self.factored_dims(
+            grad.shape,
+            factored=factored,
+            min_dim_size_to_factor=0
+        )
+
+        if factored_dims is not None:
+            dc, dr = factored_dims
+            row_shape = list(p.grad.shape)
+            row_shape[dr] = 1
+            col_shape = list(p.grad.shape)
+            col_shape[dc] = 1
+            # Store reduction variables so we don't have to recalculate each step.
+            state["exp_avg_sq"] = [grad.new_zeros(row_shape).detach(), grad.new_zeros(col_shape).detach(), dr, dc]
         else:
-            state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
+            state['exp_avg_sq'] = [torch.zeros_like(p, memory_format=torch.preserve_format).detach()]
         
         # If the initial weights are zero, don't bother storing them.
         if p.data.count_nonzero() > 0:
@@ -244,7 +283,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         first_param = self.param_groups[0]['params'][0]
         device = first_param.device
-        eps = torch.finfo(first_param.dtype).eps
 
         if self.split_groups:
             groups = self.param_groups
@@ -298,6 +336,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_numerator_accum = torch.tensor(0.0, dtype=torch.float32, device=device)
             d_denom = torch.tensor(0.0, dtype=torch.float32, device=device)
 
+            if factored:
+                # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
+                beta2 = min(1 - k ** -0.8, beta2)
+
             # Bias correction.
             if group['use_bias_correction']:
                 beta2 = (1 - beta2) / (1 - beta2 ** k)
@@ -310,6 +352,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     self.initialise_state(p, self.state[p], factored)
                 group['initialised'] = True
 
+            one_minus_beta2_d = d * d * (1 - beta2)
+
             for p in active_p:
                 grad = p.grad
                 state = self.state[p]
@@ -319,14 +363,19 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 sliced_grad = self.get_sliced_tensor(grad)
                 sliced_data = self.get_sliced_tensor(p)
                 
+                exp_avg_sq = state['exp_avg_sq']
+
                 # Adam EMA updates
-                if 'exp_avg_sq_row' in state:
-                    grad_sq = grad.square()
-                    state['exp_avg_sq_row'].mul_(beta2).add_(grad_sq.mean(dim=-1), alpha=d * d * (1 - beta2))
-                    state['exp_avg_sq_col'].mul_(beta2).add_(grad_sq.mean(dim=-2), alpha=d * d * (1 - beta2))
-                    del grad_sq
+                if len(exp_avg_sq) == 4:
+                    row_var, col_var, dr, dc = exp_avg_sq
+
+                    row_mean = (torch.norm(grad, dim=dr, keepdim=True).square_().div_(grad.size(-1)))
+                    row_var.mul_(beta2).add_(row_mean, alpha=one_minus_beta2_d)
+
+                    col_mean = (torch.norm(grad, dim=dc, keepdim=True).square_().div_(grad.size(-2)))
+                    col_var.mul_(beta2).add_(col_mean, alpha=one_minus_beta2_d)
                 else:
-                    state['exp_avg_sq'].mul_(beta2).addcmul_(grad, grad, value=d * d * (1 - beta2))
+                    exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
                 x0_minus = state['p0'] - sliced_data
                 d_numerator_accum.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
@@ -368,7 +417,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             if foreach:
                 ys, zs, updates = zip(*[(p, self.state[p]['z'],
-                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p], eps)))
+                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p]['exp_avg_sq'])))
                                         for p in active_p])
                 
                 # Weight decay.
@@ -390,7 +439,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     # Adam-atan2. Use atan2 rather than epsilon and division 
                     # for parameter updates (https://arxiv.org/abs/2407.05872).
                     # Has the nice property of "clipping" the gradient as well.
-                    denom = self.denom_from_state(state, eps)
+                    denom = self.denom_from_state(state['exp_avg_sq'])
                     update = grad.mul_(d).atan2_(denom)
 
                     # Weight decay.
