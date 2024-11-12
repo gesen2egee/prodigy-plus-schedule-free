@@ -259,7 +259,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             state['exp_avg_sq'] = [torch.zeros_like(p, memory_format=torch.preserve_format).detach()]
         
         # If the initial weights are zero, don't bother storing them.
-        if p.data.count_nonzero() > 0:
+        if p.count_nonzero() > 0:
             state['p0'] = sliced_data.to(dtype=dtype, memory_format=torch.preserve_format, copy=True).detach()
         else:
             state['p0'] = torch.tensor(0.0, dtype=dtype, device=p.device)
