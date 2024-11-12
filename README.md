@@ -52,6 +52,7 @@ Set `split_groups` to False to mimic Prodigy's normal behaviour, which uses a si
 
 In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
 can be controlled via the `prodigy_steps` settings. [It's been suggested that all Prodigy needs to do is achieve "escape velocity"](https://arxiv.org/pdf/2409.20325)
-in terms of finding a good LR, which it usually achieves after ~25% of training, though this is very dependent on batch size and epochs. This setting
-can be particularly helpful when training diffusion models, which have very different gradient behaviour than what most optimisers are tuned for. Prodigy in particular
-will increase the LR forever.
+in terms of finding a good LR, which it usually achieves after ~25% of training, though this is very dependent on batch size and epochs. 
+
+This setting can be particularly helpful when training diffusion models, which have very different gradient behaviour than what most optimisers are tuned for. Prodigy in particular
+will increase the LR forever if it is not stopped or capped in some way (usually via a decaying LR scheduler).
