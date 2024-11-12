@@ -1,20 +1,13 @@
 # Prodigy + ScheduleFree
-
+*Eliminating hyperparameters, one variable at a time.**
 **Current status:** Experimental
 
-## Updates
-**Update #3 - 6/11/2024:** Removed the non-schedule free path, removed epsilon entirely (Adam-atan2 is default), and tweaked the default settings.
-
-**Update #2 - 4/11/2024:** Adapted factored second moment [from this pull request](https://github.com/konstmish/prodigy/pull/25) for reduced memory usage. Toggled via `factored=True`.
-Keep the first moment as-is, as literature suggests performance suffers without it (https://arxiv.org/pdf/2106.04560, section 3.4).
-
-**Update #1 - 4/11/2024:** Now uses Adam-atan2 by default for parameter updates (https://arxiv.org/abs/2407.05872). This is
-not compatible with StableAdamW, however, the use of atan2 appears to naturally bound the updates. Needs more testing, can be disabled via `adam_atan2=False`.
-
 ## Details
-An optimiser based on Prodigy that includes schedule-free logic. Has additional improvements in the form of Adam-atan2 updates, 
-per parameter group adaptation, lower memory utilisation, moving average stepsizes and gradient amplification to help Prodigy better
-adapt the learning rate when gradients are poor.
+An optimiser based on Prodigy that includes schedule-free logic and much, much lower memory usage, the aim being to remove the need to set any hyperparameters. Of course,
+that's never the case with any optimiser, but hopefully, this comes close!
+
+Hyperparameters eliminated: Learning rate (Prodigy), LR scheduler (ScheduleFree), epsilon (Adam-atan2). Still working on betas and weight decay, though
+those are much harder.
 
 Based on code from:
 * https://github.com/facebookresearch/schedule_free
