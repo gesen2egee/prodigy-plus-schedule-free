@@ -145,8 +145,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.groups_to_process = None
         self.shared_d = None
 
-        self.running_d_numerator = 0
-        self.running_d_denom = 0
+        self.running_d_numerator = None
+        self.running_d_denom = None
         
         super().__init__(params, defaults)
 
@@ -291,8 +291,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d_numerator = group['d_numerator']
 
         d_numerator *= beta3
-        d_numerator += self.running_d_numerator
-        d_denom_item = self.running_d_denom
+        d_numerator += self.running_d_numerator.item()
+        d_denom_item = self.running_d_denom.item()
 
         # Use atan2 so we no longer need to worry about d_denom being 0. This
         # does reduce the usefulness of d_coef.
@@ -315,8 +315,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         group['d'] = d
         group['d_numerator'] = d_numerator
 
-        self.running_d_numerator = 0
-        self.running_d_denom = 0
+        self.running_d_numerator.zero_()
+        self.running_d_denom.zero_()
 
     @torch.no_grad()
     def step_parameter(self, p, group, i):
@@ -327,6 +327,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             # Optimiser hasn't run yet, so initialise.
             self.groups_to_process = len(self.param_groups)
         elif self.groups_to_process == 0:
+            # Use tensors to keep everything on device during parameter loop.
+            self.running_d_numerator = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+            self.running_d_denom = torch.tensor(0.0, dtype=torch.float32, device=p.device)
             # Start of new optimiser run, so grab updated d.
 
             if not self.split_groups:
@@ -363,10 +366,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if k < warmup_steps:
                 dlr *= k / warmup_steps
 
-            # Use tensors to keep everything on device during parameter loop.
-            d_numerator_accum = torch.tensor(0.0, dtype=torch.float32, device=p.device)
-            d_denom = torch.tensor(0.0, dtype=torch.float32, device=p.device)
-
             # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
             if factored:
                 beta2 = min(1 - k ** -0.8, beta2)
@@ -402,15 +401,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
             x0_minus = state['p0'] - sliced_data
-            d_numerator_accum.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
             del x0_minus
 
             s.mul_(beta3).add_(sliced_grad, alpha=d_update)
-            d_denom.add_(s.abs().sum())
-
-            # Materialise final values off-device once we're done.
-            self.running_d_numerator += d_numerator_accum.item()
-            self.running_d_denom += d_denom.item()
+            self.running_d_denom.add_(s.abs().sum())
 
             if i == 0:
                 lr_max = group['lr_max'] = max(dlr, group['lr_max'])
