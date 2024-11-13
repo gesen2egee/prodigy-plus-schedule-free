@@ -94,6 +94,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         foreach (boolean):
             Use the partial foreach implementation for improved performance. Can be slower in low memory situations.
             (default False)
+        fused_back_pass (boolean):
+            Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -107,7 +109,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  factored=False,
                  foreach=False,
                  debug_print=False,
-                 fused_back_pass=True):
+                 fused_back_pass=False):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -137,8 +139,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored,
-                        foreach=foreach,
-                        fused_back_pass=fused_back_pass)
+                        foreach=foreach)
         
         self.d0 = d0
         self.split_groups = split_groups
@@ -148,6 +149,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         # Properties for fused backward pass.
         self.groups_to_process = None
         self.shared_d = None
+        self.fused_back_pass = fused_back_pass
 
         self.running_d_numerator = None
         self.running_d_denom = None
@@ -467,6 +469,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
     @torch.no_grad()
     def step(self, closure=None):
+        if self.fused_back_pass:
+            return
+        
         """Performs a single optimisation step.
 
         Arguments:
