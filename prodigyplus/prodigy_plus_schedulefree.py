@@ -96,6 +96,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             (default False)
         fused_back_pass (boolean):
             Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
+            (default False)
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -226,7 +227,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         Returns:
         None or a tuple of ints
         """
-        if not factored or len(shape) < 2:
+        if not factored or len(shape) != 2:
             return None
         if all(dim < min_dim_size_to_factor for dim in shape):
             return None
