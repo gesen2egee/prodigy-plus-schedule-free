@@ -125,7 +125,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
-                        k=0,initialised=None,
+                        k=1,initialised=None,
                         train_mode=True,
                         weight_sum=0,
                         prodigy_steps=prodigy_steps,
@@ -141,6 +141,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.split_groups = split_groups
         self.split_groups_mean = split_groups_mean
 
+        # Properties for fused backward pass.
+        self.groups_to_process = None
+        self.shared_d = None
+
+        self.running_d_numerator = 0
+        self.running_d_denom = 0
+        
         super().__init__(params, defaults)
 
     @torch.no_grad()
@@ -267,6 +274,184 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         state['s'] = torch.zeros_like(sliced_data, memory_format=torch.preserve_format, dtype=dtype).detach()
 
     @torch.no_grad()
+    def update_d_and_reset(self, group):
+        k = group['k']
+        _, beta2 = group['betas']
+        beta3 = group['beta3']
+        if beta3 is None:
+            beta3 = beta2 ** 0.5
+        beta4 = group['beta4']
+        if beta4 is None:
+            beta4 = -beta2
+
+        d = group['d']
+        d_coef = group['d_coef']
+        prodigy_steps = group['prodigy_steps']
+
+        d_numerator = group['d_numerator']
+
+        d_numerator *= beta3
+        d_numerator += self.running_d_numerator
+        d_denom_item = self.running_d_denom
+
+        # Use atan2 so we no longer need to worry about d_denom being 0. This
+        # does reduce the usefulness of d_coef.
+        d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), 1e-6)
+
+        if prodigy_steps <= 0 or k < prodigy_steps:
+            if beta4 > 0:
+                # Always update d via EMA.
+                d = d * beta4 + (1 - beta4) * d_hat
+            elif beta4 < 0:
+                # Only update d via EMA if d_hat is decreasing.
+                if d_hat >= d:
+                    d = d_hat
+                else:
+                    beta4 = abs(beta4)
+                    d = d * beta4 + (1 - beta4) * d_hat
+            else:
+                d = max(d_hat, d)
+        
+        group['d'] = d
+        group['d_numerator'] = d_numerator
+
+        self.running_d_numerator = 0
+        self.running_d_denom = 0
+
+    @torch.no_grad()
+    def step_parameter(self, p, group, i):
+        if not group['train_mode']:
+            raise Exception("Not in train mode!")
+
+        if self.groups_to_process is None:
+            # Optimiser hasn't run yet, so initialise.
+            self.groups_to_process = len(self.param_groups)
+        elif self.groups_to_process == 0:
+            # Start of new optimiser run, so grab updated d.
+
+            if not self.split_groups:
+                # When groups aren't split, calculate d for the first group,
+                # then copy to all other groups.
+                self.update_d_and_reset(group)
+                for g in self.param_groups:
+                    g['d'] = group['d']
+
+            self.groups_to_process = len(self.param_groups)
+            self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
+
+        k = group['k']
+        
+        if p.grad is not None:
+            lr = group['lr']
+
+            beta1, beta2 = group['betas']
+            beta3 = group['beta3']
+
+            warmup_steps = group['warmup_steps']
+
+            d = group['d']
+
+            factored = group['factored']
+
+            if beta3 is None:
+                beta3 = beta2 ** 0.5
+
+            dlr = (self.shared_d if self.split_groups and self.shared_d else d) * lr
+            d_update = dlr * (1 - beta3)
+
+            # Apply warmup separate to the denom and numerator updates.
+            if k < warmup_steps:
+                dlr *= k / warmup_steps
+
+            # Use tensors to keep everything on device during parameter loop.
+            d_numerator_accum = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+            d_denom = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+
+            # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
+            if factored:
+                beta2 = min(1 - k ** -0.8, beta2)
+
+            # Bias correction.
+            if group['use_bias_correction']:
+                beta2 = (1 - beta2) / (1 - beta2 ** k)
+
+            state = self.state[p]
+            self.initialise_state(p, state, factored)
+
+            one_minus_beta2_d = d * d * (1 - beta2)
+
+            grad = p.grad
+
+            s = state['s']
+
+            sliced_grad = self.get_sliced_tensor(grad)
+            sliced_data = self.get_sliced_tensor(p)
+                
+            exp_avg_sq = state['exp_avg_sq']
+
+            # Adam EMA updates
+            if len(exp_avg_sq) == 4:
+                row_var, col_var, dr, dc = exp_avg_sq
+                # From: https://github.com/pytorch/pytorch/blob/main/torch/optim/_adafactor.py. Avoids grad.square().
+                row_mean = grad.norm(dim=dr, keepdim=True).square_().mul_(1 / grad.shape[dr])
+                row_var.mul_(beta2).add_(row_mean, alpha=one_minus_beta2_d)
+
+                col_mean = grad.norm(dim=dc, keepdim=True).square_().mul_(1 / grad.shape[dc])
+                col_var.mul_(beta2).add_(col_mean, alpha=one_minus_beta2_d)
+            else:
+                exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
+
+            x0_minus = state['p0'] - sliced_data
+            d_numerator_accum.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+            del x0_minus
+
+            s.mul_(beta3).add_(sliced_grad, alpha=d_update)
+            d_denom.add_(s.abs().sum())
+
+            # Materialise final values off-device once we're done.
+            self.running_d_numerator += d_numerator_accum.item()
+            self.running_d_denom += d_denom.item()
+
+            if i == 0:
+                lr_max = group['lr_max'] = max(dlr, group['lr_max'])
+                weight = lr_max ** 2
+                weight_sum = group['weight_sum'] = group['weight_sum'] + weight
+            else:
+                lr_max = group['lr_max']
+                weight = lr_max ** 2
+                weight_sum = group['weight_sum']
+
+            ckp1 = weight / weight_sum if weight_sum else 0
+
+            weight_decay = dlr * group['weight_decay']
+
+            y = p
+            z = state['z']
+
+            # Adam-atan2. Use atan2 rather than epsilon and division 
+            # for parameter updates (https://arxiv.org/abs/2407.05872).
+            # Has the nice property of "clipping" the gradient as well.
+            denom = self.denom_from_state(exp_avg_sq)
+            update = grad.mul_(d).atan2_(denom)
+
+            # Weight decay.
+            update.add_(y, alpha=weight_decay)
+
+            y.lerp_(end=z, weight=ckp1)
+            y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+
+            z.sub_(update, alpha=dlr)
+            del update, denom
+
+        # End of param loop for group, update calculations.
+        if i == len(group['params']) - 1:
+            group['k'] = k + 1
+            self.groups_to_process -= 1
+            if self.split_groups:
+                # When groups are split, calculate per-group d.
+                self.update_d_and_reset(group)
+
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimisation step.
 
@@ -304,7 +489,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             beta3 = group['beta3']
             beta4 = group['beta4']
 
-            k = group['k'] + 1
+            k = group['k']
             prodigy_steps = group['prodigy_steps']
             warmup_steps = group['warmup_steps']
 
@@ -367,10 +552,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 if len(exp_avg_sq) == 4:
                     row_var, col_var, dr, dc = exp_avg_sq
                     # From: https://github.com/pytorch/pytorch/blob/main/torch/optim/_adafactor.py. Avoids grad.square().
-                    row_mean = grad.norm(dim=dr, keepdim=True).square_().mul_(1 / float(grad.shape[dr]))
+                    row_mean = grad.norm(dim=dr, keepdim=True).square_().mul_(1 / grad.shape[dr])
                     row_var.mul_(beta2).add_(row_mean, alpha=one_minus_beta2_d)
 
-                    col_mean = grad.norm(dim=dc, keepdim=True).square_().mul_(1 / float(grad.shape[dc]))
+                    col_mean = grad.norm(dim=dc, keepdim=True).square_().mul_(1 / grad.shape[dc])
                     col_var.mul_(beta2).add_(col_mean, alpha=one_minus_beta2_d)
                 else:
                     exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
@@ -449,7 +634,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     z.sub_(update, alpha=dlr)
                     del update, denom
 
-            group['k'] = k
+            group['k'] = k + 1
 
             group['d'] = d
             group['d_numerator'] = d_numerator
