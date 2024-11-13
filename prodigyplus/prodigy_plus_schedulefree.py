@@ -90,7 +90,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             (default "harmonic_mean")
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
-            (default True)
+            (default False)
         foreach (boolean):
             Use the partial foreach implementation for improved performance. Can be slower in low memory situations.
             (default False)
@@ -104,7 +104,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  warmup_steps=0,
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
-                 factored=True,
+                 factored=False,
                  foreach=False):
         
         if not 0.0 < d0:
