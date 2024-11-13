@@ -319,7 +319,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.running_d_denom.zero_()
 
     @torch.no_grad()
-    def step_parameter(self, p, group, i):
+    def step_param(self, p, group):
         if not group['train_mode']:
             raise Exception("Not in train mode!")
 
@@ -452,6 +452,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if self.split_groups:
                 # When groups are split, calculate per-group d.
                 self.update_d_and_reset(group)
+
+    @torch.no_grad()
+    def step_parameter(self, p, group, i):
+        self.step_param(p, group)
 
     @torch.no_grad()
     def step(self, closure=None):
