@@ -106,7 +106,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  split_groups_mean="harmonic_mean",
                  factored=False,
                  foreach=False,
-                 debug_print=False):
+                 debug_print=False,
+                 fused_back_pass=True):
         
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -136,7 +137,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored,
-                        foreach=foreach)
+                        foreach=foreach,
+                        fused_back_pass=fused_back_pass)
         
         self.d0 = d0
         self.split_groups = split_groups
@@ -184,6 +186,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
     @property
     def supports_flat_params(self):
+        return True
+    
+    def supports_fused_back_pass(self):
         return True
 
     @torch.no_grad()
