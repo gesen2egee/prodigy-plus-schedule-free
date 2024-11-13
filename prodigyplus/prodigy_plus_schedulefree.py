@@ -340,7 +340,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
 
         k = group['k']
-        
+
         if p.grad is not None:
             lr = group['lr']
 
@@ -574,6 +574,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             # Use atan2 so we no longer need to worry about d_denom being 0. This
             # does reduce the usefulness of d_coef.
             d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), 1e-6)
+            d_prev = d
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 if beta4 > 0:
@@ -600,7 +601,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             if foreach:
                 ys, zs, updates = zip(*[(p, self.state[p]['z'],
-                                        p.grad.mul_(d).atan2_(self.denom_from_state(self.state[p]['exp_avg_sq'])))
+                                        p.grad.mul_(d_prev).atan2_(self.denom_from_state(self.state[p]['exp_avg_sq'])))
                                         for p in active_p])
                 
                 # Weight decay.
@@ -623,7 +624,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     # for parameter updates (https://arxiv.org/abs/2407.05872).
                     # Has the nice property of "clipping" the gradient as well.
                     denom = self.denom_from_state(state['exp_avg_sq'])
-                    update = grad.mul_(d).atan2_(denom)
+                    update = grad.mul_(d_prev).atan2_(denom)
 
                     # Weight decay.
                     update.add_(y, alpha=weight_decay)
