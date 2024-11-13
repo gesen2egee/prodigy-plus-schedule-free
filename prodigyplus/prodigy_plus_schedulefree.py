@@ -484,6 +484,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 all_params = [p for group in self.param_groups for p in group['params']]
             else:
                 groups = self.param_groups
+                all_params = None
             d_mean = None
 
         for group in groups:
