@@ -478,11 +478,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             all_params = None
             d_mean = self.get_d_mean(groups, self.split_groups_mean)
         else:
-            # Emulate original Prodigy implementation.
-            groups = [self.param_groups[0]]
-            all_params = []
-            for group in self.param_groups:
-                all_params.extend(group['params'])
+            # Emulate original Prodigy implementation if more than
+            # one parameter group.
+            if len(self.param_groups) > 1:
+                groups = [self.param_groups[0]]
+                all_params = [p for group in self.param_groups for p in group['params']]
+            else:
+                groups = self.param_groups
             d_mean = None
 
         for group in groups:
