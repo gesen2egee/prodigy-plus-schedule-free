@@ -325,12 +325,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         if self.groups_to_process is None:
             # Optimiser hasn't run yet, so initialise.
-            self.groups_to_process = len(self.param_groups)
-        elif self.groups_to_process == 0:
+            self.groups_to_process = {i: len(group['params']) for i, group in enumerate(self.param_groups)}
+
             # Use tensors to keep everything on device during parameter loop.
             self.running_d_numerator = torch.tensor(0.0, dtype=torch.float32, device=p.device)
             self.running_d_denom = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+        elif len(self.groups_to_process) == 0:
             # Start of new optimiser run, so grab updated d.
+            self.groups_to_process = {i: len(group['params']) for i, group in enumerate(self.param_groups)}
 
             if not self.split_groups:
                 # When groups aren't split, calculate d for the first group,
@@ -339,7 +341,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 for g in self.param_groups:
                     g['d'] = group['d']
 
-            self.groups_to_process = len(self.param_groups)
             self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
 
         k = group['k']
@@ -438,10 +439,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             z.sub_(update, alpha=dlr)
             del update, denom
 
+        # Decrement params processed so far.
+        group_index = self.param_groups.index(group)
+        self.groups_to_process[group_index] -= 1
+
         # End of param loop for group, update calculations.
-        if i == len(group['params']) - 1:
+        if self.groups_to_process[group_index] == 0:
             group['k'] = k + 1
-            self.groups_to_process -= 1
+            self.groups_to_process.pop(group_index)
             if self.split_groups:
                 # When groups are split, calculate per-group d.
                 self.update_d_and_reset(group)
