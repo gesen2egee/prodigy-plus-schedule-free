@@ -345,6 +345,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         k = group['k']
 
+        group_index = self.param_groups.index(group)
+        is_first_param_for_group = self.groups_to_process[group_index] == len(group['params'])
+
         if p.grad is not None:
             lr = group['lr']
 
@@ -408,7 +411,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             s.mul_(beta3).add_(sliced_grad, alpha=d_update)
             self.running_d_denom.add_(s.abs().sum())
 
-            if i == 0:
+            if is_first_param_for_group:
                 lr_max = group['lr_max'] = max(dlr, group['lr_max'])
                 weight = lr_max ** 2
                 weight_sum = group['weight_sum'] = group['weight_sum'] + weight
@@ -440,7 +443,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             del update, denom
 
         # Decrement params processed so far.
-        group_index = self.param_groups.index(group)
         self.groups_to_process[group_index] -= 1
 
         # End of param loop for group, update calculations.
