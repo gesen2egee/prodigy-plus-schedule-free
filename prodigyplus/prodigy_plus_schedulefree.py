@@ -294,23 +294,22 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d_numerator += self.running_d_numerator.item()
         d_denom_item = self.running_d_denom.item()
 
-        # Use atan2 so we no longer need to worry about d_denom being 0. This
-        # does reduce the usefulness of d_coef.
-        d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), 1e-6)
+        if d_denom_item > 0:
+            d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
 
-        if prodigy_steps <= 0 or k < prodigy_steps:
-            if beta4 > 0:
-                # Always update d via EMA.
-                d = d * beta4 + (1 - beta4) * d_hat
-            elif beta4 < 0:
-                # Only update d via EMA if d_hat is decreasing.
-                if d_hat >= d:
-                    d = d_hat
-                else:
-                    beta4 = abs(beta4)
+            if prodigy_steps <= 0 or k < prodigy_steps:
+                if beta4 > 0:
+                    # Always update d via EMA.
                     d = d * beta4 + (1 - beta4) * d_hat
-            else:
-                d = max(d_hat, d)
+                elif beta4 < 0:
+                    # Only update d via EMA if d_hat is decreasing.
+                    if d_hat >= d:
+                        d = d_hat
+                    else:
+                        beta4 = abs(beta4)
+                        d = d * beta4 + (1 - beta4) * d_hat
+                else:
+                    d = max(d_hat, d)
         
         group['d'] = d
         group['d_numerator'] = d_numerator
@@ -579,24 +578,24 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_numerator += d_numerator_accum.item()
             d_denom_item = d_denom.item()
 
-            # Use atan2 so we no longer need to worry about d_denom being 0. This
-            # does reduce the usefulness of d_coef.
-            d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), 1e-6)
             d_prev = d
+            
+            if d_denom_item > 0:
+                d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
 
-            if prodigy_steps <= 0 or k < prodigy_steps:
-                if beta4 > 0:
-                    # Always update d via EMA.
-                    d = d * beta4 + (1 - beta4) * d_hat
-                elif beta4 < 0:
-                    # Only update d via EMA if d_hat is decreasing.
-                    if d_hat >= d:
-                        d = d_hat
-                    else:
-                        beta4 = abs(beta4)
+                if prodigy_steps <= 0 or k < prodigy_steps:
+                    if beta4 > 0:
+                        # Always update d via EMA.
                         d = d * beta4 + (1 - beta4) * d_hat
-                else:
-                    d = max(d_hat, d)
+                    elif beta4 < 0:
+                        # Only update d via EMA if d_hat is decreasing.
+                        if d_hat >= d:
+                            d = d_hat
+                        else:
+                            beta4 = abs(beta4)
+                            d = d * beta4 + (1 - beta4) * d_hat
+                    else:
+                        d = max(d_hat, d)
 
             weight_decay = dlr * group['weight_decay']
 
