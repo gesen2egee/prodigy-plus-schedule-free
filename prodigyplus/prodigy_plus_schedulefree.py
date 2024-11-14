@@ -239,8 +239,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         # Implicit detection of factored mode and single dim tensors.
         if len(exp_avg_sq) == 4:
             row_var, col_var, dr, dc = exp_avg_sq
-            eps = 1e-7 if row_var.dtype == torch.float16 or row_var.dtype == torch.bfloat16 else 1e-30
-            
+            eps = 1e-7 if row_var.dtype == torch.float16 else 1e-25
+
             reduce_dc = dc - 1 if dc > dr else dc
             row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True).clamp_min_(eps)
             return row_var.div(row_col_mean).sqrt_() * col_var.sqrt()
