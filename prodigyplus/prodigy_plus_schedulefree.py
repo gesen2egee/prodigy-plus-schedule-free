@@ -415,6 +415,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 row_var, col_var, dr, dc = exp_avg_sq
                 row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
                 col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
+                del grad_sqr
             else:
                 exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
@@ -591,6 +592,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     row_var, col_var, dr, dc = exp_avg_sq
                     row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
                     col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
+                    del grad_sqr
                 else:
                     exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
