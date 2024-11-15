@@ -310,7 +310,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d_denom_item = self.running_d_denom.item()
 
         if d_denom_item > 0:
-            d_hat = math.atan2(d_coef * d_numerator, d_denom_item, d0)
+            d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d0)
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 if beta4 > 0:
@@ -608,7 +608,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d_prev = d
             
             if d_denom_item > 0:
-                d_hat = max(d_coef * d_numerator / d_denom_item, 1e-6)
+                d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d0)
 
                 if prodigy_steps <= 0 or k < prodigy_steps:
                     if beta4 > 0:
