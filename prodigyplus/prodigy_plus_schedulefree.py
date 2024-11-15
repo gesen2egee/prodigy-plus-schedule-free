@@ -211,7 +211,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         
         raise ValueError(f"Invalid value for split_groups_mean: '{mode}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
-    # From: https://github.com/huggingface/pytorch-image-models/pull/2320
+    # Modified Adafactor factorisation implementation from by Ross Wightman 
+    # https://github.com/huggingface/pytorch-image-models/pull/2320
     @torch.no_grad()
     def factored_dims(self,
         shape,
@@ -239,11 +240,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         # Implicit detection of factored mode and single dim tensors.
         if len(exp_avg_sq) == 4:
             row_var, col_var, dr, dc = exp_avg_sq
-            eps = 1e-7 if row_var.dtype == torch.float16 else 1e-25
-
             reduce_dc = dc - 1 if dc > dr else dc
-            row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True).clamp_min_(eps)
-            return row_var.div(row_col_mean).sqrt_() * col_var.sqrt()
+            row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True)
+            row_factor = row_var.div(row_col_mean).sqrt_()
+            col_factor = col_var.sqrt()
+            return row_factor * col_factor
 
         return exp_avg_sq[0].sqrt()
     
@@ -401,13 +402,16 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             # Adam EMA updates
             if len(exp_avg_sq) == 4:
+                if p.dtype == torch.float16:
+                    eps = 1e-7
+                elif p.dtype == torch.bfloat16:
+                    eps = 1e-25
+                else:
+                    eps = 1e-30
+                grad_sqr = grad.square().add_(eps)
                 row_var, col_var, dr, dc = exp_avg_sq
-                # From: https://github.com/pytorch/pytorch/blob/main/torch/optim/_adafactor.py. Avoids grad.square().
-                row_mean = grad.norm(dim=dr, keepdim=True).square_().mul_(1 / grad.shape[dr])
-                row_var.mul_(beta2).add_(row_mean, alpha=one_minus_beta2_d)
-
-                col_mean = grad.norm(dim=dc, keepdim=True).square_().mul_(1 / grad.shape[dc])
-                col_var.mul_(beta2).add_(col_mean, alpha=one_minus_beta2_d)
+                row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
+                col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
             else:
                 exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
@@ -572,13 +576,16 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
                 # Adam EMA updates
                 if len(exp_avg_sq) == 4:
+                    if p.dtype == torch.float16:
+                        eps = 1e-7
+                    elif p.dtype == torch.bfloat16:
+                        eps = 1e-25
+                    else:
+                        eps = 1e-30
+                    grad_sqr = grad.square().add_(eps)
                     row_var, col_var, dr, dc = exp_avg_sq
-                    # From: https://github.com/pytorch/pytorch/blob/main/torch/optim/_adafactor.py. Avoids grad.square().
-                    row_mean = grad.norm(dim=dr, keepdim=True).square_().mul_(1 / grad.shape[dr])
-                    row_var.mul_(beta2).add_(row_mean, alpha=one_minus_beta2_d)
-
-                    col_mean = grad.norm(dim=dc, keepdim=True).square_().mul_(1 / grad.shape[dc])
-                    col_var.mul_(beta2).add_(col_mean, alpha=one_minus_beta2_d)
+                    row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
+                    col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
                 else:
                     exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
