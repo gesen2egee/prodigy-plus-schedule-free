@@ -111,7 +111,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  foreach=False,
                  debug_print=False,
                  fused_back_pass=False):
-        
+
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
         if not 0.0 < lr:
@@ -146,6 +146,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.split_groups = split_groups
         self.split_groups_mean = split_groups_mean
         self.debug_print = debug_print
+
+        atan_scale = 16
+        self.atan_scale = (1 / math.atan(1 / atan_scale), atan_scale)
 
         # Properties for fused backward pass.
         self.groups_to_process = None
@@ -435,6 +438,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             weight_decay = dlr * group['weight_decay']
 
+            atan_a, atan_b = self.atan_scale
+
             y = p
             z = state['z']
 
@@ -442,7 +447,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             # for parameter updates (https://arxiv.org/abs/2407.05872).
             # Has the nice property of "clipping" the gradient as well.
             denom = self.denom_from_state(exp_avg_sq)
-            update = grad.mul_(d).atan2_(denom)
+            update = grad.mul_(d).atan2_(denom.mul_(atan_b)).mul_(atan_a)
 
             # Weight decay.
             update.add_(y, alpha=weight_decay)
@@ -628,9 +633,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             ckp1 = weight / weight_sum if weight_sum else 0
 
+            atan_a, atan_b = self.atan_scale
+
             if foreach:
                 ys, zs, updates = zip(*[(p, self.state[p]['z'],
-                                        p.grad.mul_(d_prev).atan2_(self.denom_from_state(self.state[p]['exp_avg_sq'])))
+                                        p.grad.mul_(d_prev).atan2_(self.denom_from_state(self.state[p]['exp_avg_sq']).mul_(atan_b)).mul_(atan_a))
                                         for p in active_p])
                 
                 # Weight decay.
@@ -653,7 +660,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     # for parameter updates (https://arxiv.org/abs/2407.05872).
                     # Has the nice property of "clipping" the gradient as well.
                     denom = self.denom_from_state(state['exp_avg_sq'])
-                    update = grad.mul_(d_prev).atan2_(denom)
+                    update = grad.mul_(d_prev).atan2_(denom.mul_(atan_b)).mul_(atan_a)
 
                     # Weight decay.
                     update.add_(y, alpha=weight_decay)
