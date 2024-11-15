@@ -214,7 +214,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         
         raise ValueError(f"Invalid value for split_groups_mean: '{mode}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
-    # Modified Adafactor factorisation implementation from by Ross Wightman 
+    # Modified Adafactor factorisation implementation by Ross Wightman 
     # https://github.com/huggingface/pytorch-image-models/pull/2320
     @torch.no_grad()
     def factored_dims(self,
