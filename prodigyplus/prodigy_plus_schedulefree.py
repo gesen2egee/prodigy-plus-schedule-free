@@ -109,7 +109,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  split_groups_mean="harmonic_mean",
                  factored=False,
                  foreach=False,
-                 debug_print=False,
                  fused_back_pass=False):
 
         if not 0.0 < d0:
@@ -145,7 +144,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.d0 = d0
         self.split_groups = split_groups
         self.split_groups_mean = split_groups_mean
-        self.debug_print = debug_print
 
         atan_scale = 16
         self.atan_scale = (1 / math.atan(1 / atan_scale), atan_scale)
@@ -472,8 +470,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
     @torch.no_grad()
     def step_parameter(self, p, group, i):
-        if self.debug_print and i == 0:
-            print("[Prodigy+ScheduleFree] Called step_parameter (fused backward pass).")
         self.step_param(p, group)
 
     @torch.no_grad()
@@ -487,9 +483,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-
-        if self.debug_print:
-            print("[Prodigy+ScheduleFree] Called step (regular optimiser step).")
 
         loss = None
         if closure is not None:
