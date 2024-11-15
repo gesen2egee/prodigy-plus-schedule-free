@@ -295,6 +295,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             beta4 = -beta2
 
         d = group['d']
+        d0 = group['d0']
         d_coef = group['d_coef']
         prodigy_steps = group['prodigy_steps']
 
@@ -366,6 +367,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             warmup_steps = group['warmup_steps']
 
             d = group['d']
+            d0 = group['d0']
 
             factored = group['factored']
 
@@ -521,6 +523,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             warmup_steps = group['warmup_steps']
 
             d = group['d']
+            d0 = group['d0']
             d_coef = group['d_coef']
             d_numerator = group['d_numerator']
 
@@ -534,7 +537,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 beta4 = -beta2
 
             dlr = (d if d_mean is None else d_mean) * lr
-            d_update = dlr * (1 - beta3)
+            d_update = (d / d0) * dlr
 
             # Apply warmup separate to the denom and numerator updates.
             if k < warmup_steps:
