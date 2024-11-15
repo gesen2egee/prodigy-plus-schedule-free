@@ -373,7 +373,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 beta3 = beta2 ** 0.5
 
             dlr = (self.shared_d if self.split_groups and self.shared_d else d) * lr
-            d_update = dlr * (1 - beta3)
+            d_update = (d / d0) * dlr
 
             # Apply warmup separate to the denom and numerator updates.
             if k < warmup_steps:
