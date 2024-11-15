@@ -381,10 +381,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if k < warmup_steps:
                 dlr *= k / warmup_steps
 
-            # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
-            if factored:
-                beta2 = min(1 - k ** -0.8, beta2)
-
             # Bias correction.
             if group['use_bias_correction']:
                 beta2 = (1 - beta2) / (1 - beta2 ** k)
@@ -548,10 +544,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             # Use tensors to keep everything on device during parameter loop.
             d_numerator_accum = torch.tensor(0.0, dtype=torch.float32, device=device)
             d_denom = torch.tensor(0.0, dtype=torch.float32, device=device)
-
-            # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
-            if factored:
-                beta2 = min(1 - k ** -0.8, beta2)
 
             # Bias correction.
             if group['use_bias_correction']:
