@@ -418,7 +418,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
             x0_minus = state['p0'] - sliced_data
-            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus).clamp_min_(0.0), alpha=d_update)
             del x0_minus
 
             s.mul_(beta3).add_(sliced_grad, alpha=d_update)
@@ -590,7 +590,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
                 x0_minus = state['p0'] - sliced_data
-                d_numerator_accum.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+                d_numerator_accum.add_(torch.dot(sliced_grad, x0_minus).clamp_min_(0.0), alpha=d_update)
                 del x0_minus
 
                 s.mul_(beta3).add_(sliced_grad, alpha=d_update)
