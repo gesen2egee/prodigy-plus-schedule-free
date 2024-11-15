@@ -231,7 +231,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         Returns:
         None or a tuple of ints
         """
-        if not factored or len(shape) != 2:
+        if not factored or len(shape) < 2:
             return None
         if all(dim < min_dim_size_to_factor for dim in shape):
             return None
