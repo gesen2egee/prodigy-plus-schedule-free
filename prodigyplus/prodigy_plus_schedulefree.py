@@ -241,7 +241,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             col_factor = col_var.sqrt()
             return row_factor * col_factor
 
-        return exp_avg_sq[0].sqrt()
+        return exp_avg_sq.sqrt()
     
     @torch.no_grad()
     def initialise_state(self, p, state, factored, bf16_state=True):
