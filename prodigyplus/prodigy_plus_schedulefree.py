@@ -307,22 +307,21 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d_numerator += self.running_d_numerator.item()
         d_denom_item = self.running_d_denom.item()
 
-        if d_denom_item > 0:
+        if d_denom_item > 0 and (prodigy_steps <= 0 or k < prodigy_steps):
             d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d0)
 
-            if prodigy_steps <= 0 or k < prodigy_steps:
-                if beta4 > 0:
-                    # Always update d via EMA.
-                    d = d * beta4 + (1 - beta4) * d_hat
-                elif beta4 < 0:
-                    # Only update d via EMA if d_hat is decreasing.
-                    if d_hat >= d:
-                        d = d_hat
-                    else:
-                        beta4 = abs(beta4)
-                        d = d * beta4 + (1 - beta4) * d_hat
+            if beta4 > 0:
+                # Always update d via EMA.
+                d = d * beta4 + (1 - beta4) * d_hat
+            elif beta4 < 0:
+                # Only update d via EMA if d_hat is decreasing.
+                if d_hat >= d:
+                    d = d_hat
                 else:
-                    d = max(d_hat, d)
+                    beta4 = abs(beta4)
+                    d = d * beta4 + (1 - beta4) * d_hat
+            else:
+                d = max(d_hat, d)
         
         group['d'] = d
         group['d_numerator'] = d_numerator
