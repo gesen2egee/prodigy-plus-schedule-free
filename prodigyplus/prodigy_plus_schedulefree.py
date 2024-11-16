@@ -66,7 +66,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         use_bias_correction (boolean):
             Turn on Adam's bias correction. Off by default.
         d0 (float):
-            Initial estimate for Prodigy (default 1e-6). A higher value may be needed if split_groups
+            Initial estimate for Prodigy (default 1e-5). A higher value may be needed if split_groups
             is set to True and/or beta4 is not 0.
         d_coef (float):
             Coefficient in the expression for the estimate of d (default 1.0).
@@ -135,8 +135,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored)
-        
+
+        super().__init__(params, defaults)
+
         self.d0 = d0
+        if split_groups and len(self.param_groups) == 1:
+            print("[Prodigy+ScheduleFree] Optimiser contains single param_group -- 'split_groups' has been disabled.")
+            split_groups = False
+
         self.split_groups = split_groups
         self.split_groups_mean = split_groups_mean
 
@@ -150,8 +156,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         self.running_d_numerator = None
         self.running_d_denom = None
-        
-        super().__init__(params, defaults)
 
     @torch.no_grad()
     def eval(self):
