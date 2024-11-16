@@ -94,6 +94,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         fused_back_pass (boolean):
             Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
             (default False)
+        abs_numerator (boolean):
+            Experimental. Use the absolute value of numerator updates. Can help in situations where d fails to increase. It
+            is strongly recommended to use this in conjunction with a lower d_coef and/or prodigy_steps.
+            (default False)
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -105,7 +109,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
                  factored=False,
-                 fused_back_pass=False):
+                 fused_back_pass=False,
+                 abs_numerator=False):
 
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -134,7 +139,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
-                        factored=factored)
+                        factored=factored,
+                        abs_numerator=abs_numerator)
 
         super().__init__(params, defaults)
 
@@ -416,9 +422,16 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
             x0_minus = state['p0'] - sliced_data
-            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus).clamp_min_(0.0), alpha=d_update)
+            d_step = torch.dot(sliced_grad, x0_minus)
             del x0_minus
 
+            if group['abs_numerator']:
+                d_step.abs_()
+            else:
+                d_step.clamp_min_(0.0)
+
+            self.running_d_numerator.add_(d_step, alpha=d_update)
+            
             s.mul_(beta3).add_(sliced_grad, alpha=d_update)
             self.running_d_denom.add_(s.abs().sum())
 
