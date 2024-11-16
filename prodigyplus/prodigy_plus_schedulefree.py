@@ -550,7 +550,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             # Bias correction.
             if group['use_bias_correction']:
-                beta2 = (1 - beta2) / (1 - beta2 ** k)
+                dlr *= (1 - beta2 ** k) ** 0.5
 
             params = group['params'] if all_params is None else all_params
             active_p = [p for p in params if p.grad is not None]
