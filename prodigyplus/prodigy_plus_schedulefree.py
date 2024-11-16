@@ -385,7 +385,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             # Bias correction.
             if group['use_bias_correction']:
-                beta2 = (1 - beta2) / (1 - beta2 ** k)
+                dlr *= (1 - beta2 ** k) ** 0.5
 
             state = self.state[p]
             self.initialise_state(p, state, factored)
