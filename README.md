@@ -48,5 +48,21 @@ In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize 
 can be controlled via the `prodigy_steps` settings. [It's been suggested that all Prodigy needs to do is achieve "escape velocity"](https://arxiv.org/pdf/2409.20325)
 in terms of finding a good LR, which it usually achieves after ~25% of training, though this is very dependent on batch size and epochs. 
 
-This setting can be particularly helpful when training diffusion models, which have very different gradient behaviour than what most optimisers are tuned for. Prodigy in particular
-will increase the LR forever if it is not stopped or capped in some way (usually via a decaying LR scheduler).
+This setting can be particularly helpful when training diffusion models, which have very different gradient behaviour than what most optimisers are tuned for. 
+Prodigy in particular will increase the LR forever if it is not stopped or capped in some way (usually via a decaying LR scheduler).
+
+## Recommended usage
+
+The schedule-free component of the optimiser works best with a constant learning rate. In most cases, Prodigy will find the optimal learning rate within the first
+25% of training, after which it may continue to increase the learning rate beyond what's best. It is strongly recommended to set `prodigy_steps` equal to 25% of your
+total step count, though you can experiment with values as little as 5-10%, depending on the model and type of training. The best way to figure out the best value
+is to monitor the `d` value(s) during a training run.
+
+![image](https://github.com/user-attachments/assets/b68f0869-7232-4a2d-a396-e0f9ea21f63b)
+
+Here is an example of an SDXL LoRA run. From left to right are the `d` values (essentially the learning rate predicition) for TE1, TE2 and the Unet. 
+In this run, `prodigy_steps` was set to `20`, as the optimal LR was found around step 15.
+
+![image](https://github.com/user-attachments/assets/d3077b0d-5f23-4500-b2b3-fc0cf45d2da7)
+
+This image shows a different run with the same dataset, but with `prodigy_steps` set to `0`. While the text encoders were mostly stable, the Unet LR continued to grow throughout training.
