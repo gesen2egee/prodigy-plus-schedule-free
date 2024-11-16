@@ -239,9 +239,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @torch.no_grad()
     def denom_from_state(self, exp_avg_sq):
         # Implicit detection of factored mode and single dim tensors.
-        if len(exp_avg_sq) == 4:
-            row_var, col_var, dr, dc = exp_avg_sq
-            reduce_dc = dc - 1 if dc > dr else dc
+        if isinstance(exp_avg_sq, list):
+            row_var, col_var, _, _, reduce_dc = exp_avg_sq
             row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True)
             row_factor = row_var.div(row_col_mean).sqrt_()
             col_factor = col_var.sqrt()
@@ -272,10 +271,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             row_shape[dr] = 1
             col_shape = list(p.grad.shape)
             col_shape[dc] = 1
+            reduce_dc = dc - 1 if dc > dr else dc
             # Store reduction variables so we don't have to recalculate each step.
-            state["exp_avg_sq"] = [grad.new_zeros(row_shape).detach(), grad.new_zeros(col_shape).detach(), dr, dc]
+            state["exp_avg_sq"] = [grad.new_zeros(row_shape).detach(), grad.new_zeros(col_shape).detach(), dr, dc, reduce_dc]
         else:
-            state['exp_avg_sq'] = [torch.zeros_like(p, memory_format=torch.preserve_format).detach()]
+            state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
         
         # If the initial weights are zero, don't bother storing them.
         if p.count_nonzero() > 0:
@@ -402,7 +402,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             exp_avg_sq = state['exp_avg_sq']
 
             # Adam EMA updates
-            if len(exp_avg_sq) == 4:
+            if isinstance(exp_avg_sq, list):
                 if p.dtype == torch.float16:
                     eps = 1e-7
                 elif p.dtype == torch.bfloat16:
@@ -410,12 +410,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 else:
                     eps = 1e-30
                 grad_sqr = grad.square().add_(eps)
-                row_var, col_var, dr, dc = exp_avg_sq
+                row_var, col_var, dr, dc, _ = exp_avg_sq
                 row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
                 col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
                 del grad_sqr
             else:
-                exp_avg_sq[0].mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
             x0_minus = state['p0'] - sliced_data
             self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus).clamp_min_(0.0), alpha=d_update)
