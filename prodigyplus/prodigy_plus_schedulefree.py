@@ -91,9 +91,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
             (default False)
-        foreach (boolean):
-            Use the partial foreach implementation for improved performance. Can be slower in low memory situations.
-            (default False)
         fused_back_pass (boolean):
             Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
             (default False)
@@ -108,7 +105,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
                  factored=False,
-                 foreach=False,
                  fused_back_pass=False):
 
         if not 0.0 < d0:
@@ -138,8 +134,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
-                        factored=factored,
-                        foreach=foreach)
+                        factored=factored)
         
         self.d0 = d0
         self.split_groups = split_groups
