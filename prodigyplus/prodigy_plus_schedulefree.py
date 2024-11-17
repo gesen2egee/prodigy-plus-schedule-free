@@ -52,6 +52,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         betas (Tuple[float, float], optional): 
             Coefficients used for computing running averages of gradient and its square 
             (default: (0.9, 0.99))
+        eps (float):
+            Term added to the denominator outside of the root operation to improve numerical stability. If set to None,
+            Adam-atan2 is used instead, which removes the need for epsilon tuning, but does not work well with newer diffusion models.
+            (default: 1e-8).
         beta3 (float):
             Coefficient for computing the Prodigy stepsize using running averages.
             If set to None, uses the value of square root of beta2 (default: None).
@@ -102,6 +106,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  d0=1e-5, d_coef=1.0,
                  prodigy_steps=0,
                  warmup_steps=0,
+                 eps=1e-8,
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
                  factored=False,
@@ -111,6 +116,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             raise ValueError("Invalid d0 value: {}".format(d0))
         if not 0.0 < lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
+        if not 0.0 < eps:
+            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
@@ -123,6 +130,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
+                        eps=eps,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
                         k=1,initialised=None,
@@ -363,6 +371,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             beta1, beta2 = group['betas']
             beta3 = group['beta3']
+            eps = group['eps']
 
             warmup_steps = group['warmup_steps']
 
@@ -435,16 +444,18 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             weight_decay = dlr * group['weight_decay']
 
-            atan_a, atan_b = self.atan_scale
-
             y = p
             z = state['z']
 
-            # Adam-atan2. Use atan2 rather than epsilon and division 
-            # for parameter updates (https://arxiv.org/abs/2407.05872).
-            # Has the nice property of "clipping" the gradient as well.
             denom = self.denom_from_state(exp_avg_sq)
-            update = grad.mul_(d).atan2_(denom.mul_(atan_b)).mul_(atan_a)
+            if eps is None:
+                # Adam-atan2. Use atan2 rather than epsilon and division 
+                # for parameter updates (https://arxiv.org/abs/2407.05872).
+                # Has the nice property of "clipping" the gradient as well.
+                atan_a, atan_b = self.atan_scale
+                update = grad.mul_(d).atan2_(denom.mul_(atan_b)).mul_(atan_a)
+            else:
+                update = grad.div_(denom.add_(d * eps)).mul_(d)
 
             # Weight decay.
             update.add_(y, alpha=weight_decay)
