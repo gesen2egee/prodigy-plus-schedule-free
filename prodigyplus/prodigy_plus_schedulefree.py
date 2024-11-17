@@ -124,7 +124,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if beta3 is not None and not 0.0 <= beta3 < 1.0:
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
-        if beta4 is not None and not 0.0 <= beta4 < 1.0:
+        if beta4 is not None and not -1.0 <= beta4 < 1.0:
             raise ValueError("Invalid beta4 parameter: {}".format(beta4))
         if split_groups_mean not in {None, "mean", "harmonic_mean", "geometric_mean"}:
             raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
