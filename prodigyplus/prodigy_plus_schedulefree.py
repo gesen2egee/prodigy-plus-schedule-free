@@ -103,7 +103,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  betas=(0.9, 0.99), beta3=None, beta4=0,
                  weight_decay=0.0,
                  use_bias_correction=False,
-                 d0=1e-5, d_coef=1.0,
+                 d0=1e-6, d_coef=1.0,
                  prodigy_steps=0,
                  warmup_steps=0,
                  eps=1e-8,
