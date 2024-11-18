@@ -154,9 +154,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.split_groups = split_groups
         self.split_groups_mean = split_groups_mean
 
-        atan_scale = 16
-        self.atan_scale = (1 / math.atan(1 / atan_scale), atan_scale)
-
         # Properties for fused backward pass.
         self.groups_to_process = None
         self.shared_d = None
@@ -452,8 +449,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 # Adam-atan2. Use atan2 rather than epsilon and division 
                 # for parameter updates (https://arxiv.org/abs/2407.05872).
                 # Has the nice property of "clipping" the gradient as well.
-                atan_a, atan_b = self.atan_scale
-                update = grad.mul_(d).atan2_(denom.mul_(atan_b)).mul_(atan_a)
+                atan_scale = 1 / d
+                update = grad.mul_(d).atan2_(denom.mul_(atan_scale)).mul_(atan_scale)
             else:
                 update = grad.div_(denom.add_(d * eps)).mul_(d)
 
