@@ -397,11 +397,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             one_minus_beta2_d = d * d * (1 - beta2)
 
             grad = p.grad
-
-            s = state['s']
+            y, z, s = p, state['z'], state['s']
 
             sliced_grad = self.get_sliced_tensor(grad)
-            sliced_data = self.get_sliced_tensor(p)
+            sliced_data = self.get_sliced_tensor(z)
                 
             exp_avg_sq = state['exp_avg_sq']
 
@@ -422,7 +421,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
             x0_minus = state['p0'] - sliced_data
-            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus).clamp_min_(0.0), alpha=d_update)
+            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
             del x0_minus
             
             s.mul_(beta3).add_(sliced_grad, alpha=d_update)
@@ -440,9 +439,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             ckp1 = weight / weight_sum if weight_sum else 0
 
             weight_decay = dlr * group['weight_decay']
-
-            y = p
-            z = state['z']
 
             denom = self.denom_from_state(exp_avg_sq)
             if eps is None:
