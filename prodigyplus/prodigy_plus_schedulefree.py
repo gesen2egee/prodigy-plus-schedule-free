@@ -399,7 +399,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             one_minus_beta2_d = d * d * (1 - beta2)
 
-            grad = p.grad
+            grad = p.grad.float()
             y, z, s = p, state['z'], state['s']
 
             sliced_grad = self.get_sliced_tensor(grad)
@@ -423,7 +423,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             else:
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
-            x0_minus = state['p0'] - sliced_data
+            x0_minus = state['p0'].float() - sliced_data.float()
             self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
             del x0_minus
             
