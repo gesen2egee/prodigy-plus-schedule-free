@@ -306,10 +306,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         prodigy_steps = group['prodigy_steps']
 
         d_numerator = group['d_numerator']
-
         d_numerator *= beta3
-        d_numerator += self.running_d_numerator.item()
+
+        d_numerator_item = self.running_d_numerator.item()
         d_denom_item = self.running_d_denom.item()
+
+        if d_numerator_item > 0 or d > d0:
+            d_numerator = max(0, d_numerator + d_numerator_item)
 
         if d_denom_item > 0 and (prodigy_steps <= 0 or k < prodigy_steps):
             d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d0)
