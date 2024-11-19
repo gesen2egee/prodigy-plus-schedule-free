@@ -277,7 +277,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             col_shape[dc] = 1
             reduce_dc = dc - 1 if dc > dr else dc
             # Store reduction variables so we don't have to recalculate each step.
-            state["exp_avg_sq"] = [grad.new_zeros(row_shape).detach(), grad.new_zeros(col_shape).detach(), dr, dc, reduce_dc]
+            # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
+            # between bf16/fp16 and fp32 is negligible here.
+            state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
+                                   torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
+                                   dr, dc, reduce_dc]
         else:
             state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
         
@@ -401,13 +405,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             # Adam EMA updates
             if isinstance(exp_avg_sq, list):
-                if p.dtype == torch.float16:
-                    eps = 1e-7
-                elif p.dtype == torch.bfloat16:
-                    eps = 1e-25
-                else:
-                    eps = 1e-30
-                grad_sqr = grad.square().add_(eps)
+                grad_sqr = grad.square().add_(1e-30)
                 row_var, col_var, dr, dc, _ = exp_avg_sq
                 row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
                 col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
