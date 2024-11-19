@@ -441,7 +441,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             ckp1 = weight / weight_sum if weight_sum else 0
 
-            weight_decay = dlr * group['weight_decay']
+            weight_decay = group['weight_decay']
 
             denom = self.denom_from_state(exp_avg_sq)
             if eps is None:
