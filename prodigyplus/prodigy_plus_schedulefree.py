@@ -114,7 +114,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
                  factored=False,
-                 fused_back_pass=False):
+                 fused_back_pass=False,
+                 scale_atan2=False):
 
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
