@@ -72,18 +72,15 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         use_bias_correction (boolean):
             Turn on Adafactor-style bias correction, which scales beta2 directly. (default False).
         d0 (float):
-            Initial estimate for Prodigy (default 1e-5). A higher value may be needed if split_groups
-            is set to True and/or beta4 is not 0.
+            Initial estimate for Prodigy (default 1e-6).
         d_coef (float):
-            Coefficient in the expression for the estimate of d (default 1.0).
-            Values such as 0.5 and 2.0 typically work as well. 
+            Coefficient in the expression for the estimate of d (default 1.0). Values such as 0.5 and 2.0 typically work as well. 
             Changing this parameter is the preferred way to tune the method.
         prodigy_steps (int):
             Freeze Prodigy stepsize adjustments after a certain optimiser step.
             (default 0)
-        warmup_steps (int): 
-            Enables a linear learning rate warmup (default 0). Use this over the warmup settings
-            of your LR scheduler.
+        warmup_steps (int):
+            Enables a linear learning rate warmup (default 0). Use this over the warmup settings of your LR scheduler.
         split_groups (boolean):
             Track individual adaptation values for each parameter group. For example, if training
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
