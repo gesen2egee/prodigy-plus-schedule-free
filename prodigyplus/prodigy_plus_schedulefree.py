@@ -68,7 +68,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Decoupled weight decay. Value is multiplied by the adaptive learning rate.
             (default: 0).
         use_bias_correction (boolean):
-            Turn on Adam's bias correction. Off by default.
+            Turn on Adafactor-style bias correction, which scales beta2 directly. (default False).
         d0 (float):
             Initial estimate for Prodigy (default 1e-5). A higher value may be needed if split_groups
             is set to True and/or beta4 is not 0.
@@ -390,9 +390,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if k < warmup_steps:
                 dlr *= k / warmup_steps
 
-            # Bias correction.
+            # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
             if group['use_bias_correction']:
-                dlr *= (1 - beta2 ** k) ** 0.5
+                beta2 = min(1 - k ** -0.8, beta2)
 
             state = self.state[p]
             self.initialise_state(p, state, factored)
