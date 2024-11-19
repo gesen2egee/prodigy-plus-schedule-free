@@ -54,8 +54,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             (default: (0.9, 0.99))
         eps (float):
             Term added to the denominator outside of the root operation to improve numerical stability. If set to None,
-            Adam-atan2 is used instead, which removes the need for epsilon tuning, but does not work well with newer diffusion models.
+            Adam-atan2 is used instead. This removes the need for epsilon tuning, but may not work well with newer diffusion models.
             (default: 1e-8).
+        scale_atan2 (boolean):
+            Ignored if eps is not None. Scale Adam-atan2 updates to more closely mimic division + epsilon updates. Set to True if
+            Adam-atan2 updates fail to increase the learning rate.
+            (default False)
         beta3 (float):
             Coefficient for computing the Prodigy stepsize using running averages.
             If set to None, uses the value of square root of beta2 (default: None).
@@ -142,7 +146,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
-                        factored=factored)
+                        factored=factored,
+                        scale_atan2=scale_atan2)
 
         super().__init__(params, defaults)
 
@@ -445,11 +450,16 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             denom = self.denom_from_state(exp_avg_sq)
             if eps is None:
+                update = grad.mul_(d)
+
                 # Adam-atan2. Use atan2 rather than epsilon and division 
                 # for parameter updates (https://arxiv.org/abs/2407.05872).
                 # Has the nice property of "clipping" the gradient as well.
-                atan_scale = 1 / d
-                update = grad.mul_(d).atan2_(denom.mul_(atan_scale)).mul_(atan_scale)
+                if group['scale_atan2']:
+                    atan_scale = 1 / d
+                    update.atan2_(denom.mul_(atan_scale)).mul_(atan_scale)
+                else:
+                    update.atan2_(denom)
             else:
                 update = grad.div_(denom.add_(d * eps)).mul_(d)
 
