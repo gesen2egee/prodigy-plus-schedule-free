@@ -64,10 +64,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Coefficient for computing the Prodigy stepsize using running averages.
             If set to None, uses the value of square root of beta2 (default: None).
         beta4 (float):
-            Smoothing coefficient for updating the running average of the Prodigy stepsize. 
-            If set to None, beta2 is used instead. Alternatively, set a negative value to only apply
-            smoothing when d_hat is less than d (abs(beta4) will be used)
-            (default 0, which disables smoothing and uses original Prodigy behaviour).
+            Coefficient for updating the learning rate from Prodigy's adaptive stepsize. Smooths out spikes in learning rate adjustments. 
+            If set to None, beta1 is used instead. (default 0, which disables smoothing and uses original Prodigy behaviour).
         weight_decay (float):
             Decoupled weight decay. Value is multiplied by the adaptive learning rate.
             (default: 0).
@@ -129,12 +127,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if beta3 is not None and not 0.0 <= beta3 < 1.0:
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
-        if beta4 is not None and not -1.0 <= beta4 < 1.0:
+        if beta4 is not None and not 0.0 <= beta4 < 1.0:
             raise ValueError("Invalid beta4 parameter: {}".format(beta4))
         if split_groups_mean not in {None, "mean", "harmonic_mean", "geometric_mean"}:
             raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
-        defaults = dict(lr=lr, betas=betas, beta3=beta3,
+        defaults = dict(lr=lr, betas=betas, beta3=beta3, beta4=beta4,
                         eps=eps,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
@@ -143,7 +141,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         weight_sum=0,
                         prodigy_steps=prodigy_steps,
                         warmup_steps=warmup_steps,
-                        beta4=beta4,
                         lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
@@ -298,13 +295,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @torch.no_grad()
     def update_d_and_reset(self, group):
         k = group['k']
-        _, beta2 = group['betas']
-        beta3 = group['beta3']
+        beta1, beta2 = group['betas']
+        beta3, beta4 = group['beta3'], group['beta4']
+        
         if beta3 is None:
             beta3 = beta2 ** 0.5
-        beta4 = group['beta4']
+
         if beta4 is None:
-            beta4 = -beta2
+            beta4 = beta1 ** 0.5
 
         d = group['d']
         d0 = group['d0']
@@ -317,24 +315,15 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d_numerator_item = self.running_d_numerator.item()
         d_denom_item = self.running_d_denom.item()
 
+        # Prevent the accumulation of negative values in the numerator in early training.
+        # We still allow negative updates once progress starts being made, as this is 
+        # important for regulating the adaptive stepsize.
         if d_numerator_item > 0 or d > d0:
             d_numerator = max(0, d_numerator + d_numerator_item)
 
         if d_denom_item > 0 and (prodigy_steps <= 0 or k < prodigy_steps):
-            d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d0)
-
-            if beta4 > 0:
-                # Always update d via EMA.
-                d = d * beta4 + (1 - beta4) * d_hat
-            elif beta4 < 0:
-                # Only update d via EMA if d_hat is decreasing.
-                if d_hat >= d:
-                    d = d_hat
-                else:
-                    beta4 = abs(beta4)
-                    d = d * beta4 + (1 - beta4) * d_hat
-            else:
-                d = max(d_hat, d)
+            d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d)
+            d = d * beta4 + d_hat * (1 - beta4) if beta4 > 0 else d_hat
         
         group['d'] = d
         group['d_numerator'] = d_numerator
