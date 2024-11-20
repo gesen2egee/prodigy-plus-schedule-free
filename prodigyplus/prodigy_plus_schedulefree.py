@@ -5,8 +5,9 @@ from statistics import mean, harmonic_mean, geometric_mean
 
 class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     r"""
-    An optimiser based on Prodigy that includes schedule-free logic. Has additional improvements in the form of
-    StableAdamW gradient scaling, per parameter group adaptation, lower memory utilisation and moving average stepsizes.
+    An optimiser based on Prodigy that includes schedule-free logic. Has additional improvements in the form of optional StableAdamW 
+    gradient scaling and Adam-atan2 updates, per parameter group adaptation, lower memory utilisation, fused back pass support and 
+    tweaks to mitigate uncontrolled LR growth.
 
     Based on code from:
     https://github.com/facebookresearch/schedule_free
@@ -18,31 +19,29 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     https://github.com/konstmish/prodigy/pull/20
 
     As with the reference implementation of schedule-free, a constant scheduler should be used, along with the appropriate
-    calls to train() and eval(). See the schedule-free documentation for more details: https://github.com/facebookresearch/schedule_free
+    calls to `train()` and `eval()`. See the schedule-free documentation for more details: https://github.com/facebookresearch/schedule_free
     
-    If you do use another scheduler, linear or cosine is preferred, as a restarting scheduler can confuse Prodigy's adaptation logic, 
-    and you should set beta4 to 0 and prodigy_steps to None.
+    If you do use another scheduler, linear or cosine is preferred, as a restarting scheduler can confuse Prodigy's adaptation logic.
 
-    Leave LR set to 1 unless you encounter instability. Do not use with gradient clipping, as this can hamper the
-    ability for the optimiser to predict stepsizes. Scaling of large gradients is already handled by StableAdamW, which
-    effectively uses Adafactor's gradient clipping.
-
-    For default Prodigy + schedule-free behaviour, set beta4 to 0 and prodigy_steps to None. Setting beta4 to None or a positive
-    value will treat the stepsize as a running average, and allow the stepsize to both decrease and increase over time. This is
-    contrary to Prodigy's default behaviour, which never decreases the stepsize.
-
-    Recommended values for beta4 if set manually are 0.99-0.999, with lower values making the adaptation more noisy and aggressive.
-    If beta4 is set to None, beta2 is used.
+    Leave `lr` set to 1 unless you encounter instability. Do not use with gradient clipping, as this can hamper the
+    ability for the optimiser to predict stepsizes. Gradient clipping/normalisation is already handled in the following configurations:
     
-    By default, split_groups is set to True, so each parameter group will have its own adaptation values. So if you're training
+    1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon)
+    2) `eps=None` (Adam-atan2, scale invariant and can mess with Prodigy's stepsize calculations in some scenarios)
+
+    A new parameter, `beta4`, allows `d` to be updated via a moving average, rather than being immediately updated. This can help
+    smooth out learning rate adjustments. Values of 0.9-0.99 are recommended if trying out the feature. If set to None, the 
+    square root of `beta1` is used, while a setting of 0 (the default) disables the feature.
+
+    By default, `split_groups` is set to `True`, so each parameter group will have its own adaptation values. So if you're training
     different networks together, they won't contaminate each other's learning rates. The disadvantage of this approach is that some 
     networks can take a long time to reach a good learning rate when trained alongside others (for example, SDXL's Unet). 
-    It's recommended to use a higher d0 (1e-5, 5e-5, 1e-4) so these networks don't get stuck at a low learning rate.
+    It's recommended to use a higher `d0` (1e-5, 5e-5, 1e-4) so these networks don't get stuck at a low learning rate.
     
-    For Prodigy's default behaviour, which lumps all parameter groups together, set split_groups to False.
+    For Prodigy's reference behaviour, which lumps all parameter groups together, set `split_groups` to `False`.
 
     In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
-    can be controlled via the prodigy_steps settings.
+    can be controlled via the `prodigy_steps` settings.
 
     Arguments:
         params (iterable):
@@ -54,10 +53,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             (default: (0.9, 0.99))
         eps (float):
             Term added to the denominator outside of the root operation to improve numerical stability. If set to None,
-            Adam-atan2 is used instead. This removes the need for epsilon tuning, but may not work well with newer diffusion models.
+            Adam-atan2 is used instead. This removes the need for epsilon tuning, but may not work well in all situations.
             (default: 1e-8).
         scale_atan2 (boolean):
-            Ignored if eps is not None. Scale Adam-atan2 updates to more closely mimic division + epsilon updates. Set to True if
+            Ignored if eps is not None. Boosts the scale of Adam-atan2 updates until d starts increasing. Set to True if
             Adam-atan2 updates fail to increase the learning rate.
             (default False)
         beta3 (float):
