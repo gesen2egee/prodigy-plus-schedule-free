@@ -44,6 +44,11 @@ For Prodigy's reference behaviour, which lumps all parameter groups together, se
 To reduce memory usage, you can set `factored` to `True`. This uses low-rank approximations for the second moment, much like Adafactor. There
 should be little to no difference in training performance, but your mileage may vary.
 
+The optimiser also supports [fused backward pass](https://pytorch.org/tutorials/intermediate/optimizer_step_in_backward_tutorial.html) to significantly lower
+gradient memory usage. The `fused_back_pass` argument must be set to `True` so the optimiser knows not to perform the regular step. Please note however that 
+your training scripts / UI of choice *must* support the feature for generic optimisers -- as of November 2024, popular trainers such as OneTrainer and Kohya 
+hard-code which optimisers have fused backward pass support, and so this optimiser's fused pass will not work out of the box with them.
+
 In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
 can be controlled via the `prodigy_steps` settings. [It's been suggested that all Prodigy needs to do is achieve "escape velocity"](https://arxiv.org/pdf/2409.20325)
 in terms of finding a good LR, which it usually achieves after ~25% of training, though this is very dependent on batch size and epochs. 
