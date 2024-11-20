@@ -27,7 +27,7 @@ If you do use another scheduler, linear or cosine is preferred, as a restarting 
 Leave `lr` set to 1 unless you encounter instability. Do not use with gradient clipping, as this can hamper the
 ability for the optimiser to predict stepsizes. Gradient clipping/normalisation is already handled in the following configurations:
 
-1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon)
+1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon. This is the default.)
 2) `eps=None` (Adam-atan2, scale invariant, but can mess with Prodigy's stepsize calculations in some scenarios)
 
 A new parameter, `beta4`, allows `d` to be updated via a moving average, rather than being immediately updated. This can help
