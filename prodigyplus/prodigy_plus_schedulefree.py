@@ -97,6 +97,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         fused_back_pass (boolean):
             Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
             (default False)
+        use_stableadamw (boolean):
+            Ignored if eps is None. Scales parameter updates by the root-mean-square of the normalised gradient, in essence
+            identical to Adafactor's gradient scaling. Set to False is the adaptive learning rate never improves.
+            (default True)
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -110,7 +114,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  split_groups_mean="harmonic_mean",
                  factored=False,
                  fused_back_pass=False,
-                 scale_atan2=False):
+                 scale_atan2=False,
+                 use_stableadamw=True):
 
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -142,7 +147,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored,
-                        scale_atan2=scale_atan2)
+                        scale_atan2=scale_atan2,
+                        use_stableadamw=use_stableadamw)
 
         super().__init__(params, defaults)
 
@@ -378,7 +384,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
-
+           
             dlr = (self.shared_d if self.split_groups and self.shared_d else d) * lr
             d_update = (d / d0) * dlr
 
@@ -447,14 +453,17 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     update.atan2_(denom)
             else:
                 update = grad.div_(denom.add_(d * eps)).mul_(d)
+                if group['use_stableadamw']:
+                    rms = grad.square().mean().sqrt().clamp_min(1.0)
+                    update.div_(rms)
 
             # Weight decay.
             update.add_(y, alpha=weight_decay)
 
             y.lerp_(end=z, weight=ckp1)
             y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
-
             z.sub_(update, alpha=dlr)
+
             del update, denom
 
         # Decrement params processed so far.
