@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'prodigy-plus-schedule-free',
   packages = find_packages(exclude=[]),
-  version = '1.2.0',
+  version = '1.3.0',
   license='Apache 2.0',
   description = 'Prodigy + ScheduleFree',
   author = 'Logan Booker',
