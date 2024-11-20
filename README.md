@@ -7,7 +7,7 @@
 An optimiser based on Prodigy that includes schedule-free logic and much, much lower memory usage, the aim being to remove the need to set any hyperparameters. Of course,
 that's never the case with any optimiser, but hopefully, this comes close!
 
-Hyperparameters eliminated: Learning rate (Prodigy), LR scheduler (ScheduleFree), epsilon (Adam-atan2). Still working on betas and weight decay, though
+Hyperparameters eliminated: Learning rate (Prodigy), LR scheduler (ScheduleFree), epsilon (Adam-atan2, optional, not enabled by default). Still working on betas and weight decay, though
 those are much harder.
 
 Based on code from:
@@ -24,25 +24,25 @@ calls to `train()` and `eval()`. See the schedule-free documentation for more de
 
 If you do use another scheduler, linear or cosine is preferred, as a restarting scheduler can confuse Prodigy's adaptation logic.
 
-Do not use with gradient clipping, as this can hamper the ability for the optimiser to adapt. Scaling of large gradients is 
-already handled by Adam-atan2, which naturally bounds the updates to $(-\pi, \pi] $.
+Leave `lr` set to 1 unless you encounter instability. Do not use with gradient clipping, as this can hamper the
+ability for the optimiser to predict stepsizes. Gradient clipping/normalisation is already handled in the following configurations:
 
-Setting `beta4` to None or a positive value will treat the stepsize as a running average, and allow the stepsize to 
-both decrease and increase over time as the loss landscape changes. This is contrary to Prodigy's default behaviour, which never decreases the stepsize.
-A positive `beta4` value will always use a moving average to update `d`, while a negative `beta4` will only update `d` as a moving average when the
-adaptive step prediction is decreasing (using `abs(beta4)`), which provides a natural decay-like effect.
+1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon)
+2) `eps=None` (Adam-atan2, scale invariant, but can mess with Prodigy's stepsize calculations in some scenarios)
 
-Recommended values for `beta4` if set manually are 0.99-0.999, with lower values making the adaptation more aggressive.
-Setting it to 0 disables the feature, while None will use `beta2`.
+A new parameter, `beta4`, allows `d` to be updated via a moving average, rather than being immediately updated. This can help
+smooth out learning rate adjustments. Values of 0.9-0.99 are recommended if trying out the feature. If set to None, the 
+square root of `beta1` is used, while a setting of 0 (the default) disables the feature.
 
-By default, `split_groups` is set to True, so each parameter group will have its own adaptation values. So if you're training
-different models together, they won't contaminate each other's learning rates. 
+By default, `split_groups` is set to `True`, so each parameter group will have its own adaptation values. So if you're training
+different networks together, they won't contaminate each other's learning rates. The disadvantage of this approach is that some 
+networks can take a long time to reach a good learning rate when trained alongside others (for example, SDXL's Unet). 
+It's recommended to use a higher `d0` (1e-5, 5e-5, 1e-4) so these networks don't get stuck at a low learning rate.
 
-The disadvantage of this approach is that some models can take a long time to reach a good learning rate when trained alongside others 
-(for example, SDXL's Unet). The default `split_groups_mean` takes care of this, however, you can also try setting `split_groups_mean` to None
-and using a higher `d0` (1e-5, 5e-5, 1e-4) instead so these networks don't get stuck at a low learning rate.
+For Prodigy's reference behaviour, which lumps all parameter groups together, set `split_groups` to `False`.
 
-Set `split_groups` to False to mimic Prodigy's normal behaviour, which uses a single set of values for all parameters.
+To reduce memory usage, you can set `factored` to `True`. This uses low-rank approximations for the second moment, much like Adafactor. There
+should be little to no difference in training performance, but your mileage may vary.
 
 In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
 can be controlled via the `prodigy_steps` settings. [It's been suggested that all Prodigy needs to do is achieve "escape velocity"](https://arxiv.org/pdf/2409.20325)
@@ -53,8 +53,13 @@ Prodigy in particular will increase the LR forever if it is not stopped or cappe
 
 ## Recommended usage
 
+First, try using the optimiser with `factored` set to `True`. If you don't encounter problems, great, you can enjoy the optimiser with significantly less memory usage!
+Otherwise, stick with the default settings.
+ 
 The schedule-free component of the optimiser works best with a constant learning rate. In most cases, Prodigy will find the optimal learning rate within the first
-25% of training, after which it may continue to increase the learning rate beyond what's best. It is strongly recommended to set `prodigy_steps` equal to 25% of your
+25% of training, after which it may continue to increase the learning rate beyond what's best.
+
+It is strongly recommended to set `prodigy_steps` equal to 25% of your
 total step count, though you can experiment with values as little as 5-10%, depending on the model and type of training. The best way to figure out the best value
 is to monitor the `d` value(s) during a training run.
 
