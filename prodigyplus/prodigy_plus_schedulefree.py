@@ -98,7 +98,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             (default False)
         use_stableadamw (boolean):
             Ignored if eps is None. Scales parameter updates by the root-mean-square of the normalised gradient, in essence
-            identical to Adafactor's gradient scaling. Set to False is the adaptive learning rate never improves.
+            identical to Adafactor's gradient scaling. Set to False if the adaptive learning rate never improves.
             (default True)
     """
     def __init__(self, params, lr=1.0,
