@@ -289,6 +289,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @torch.no_grad()
     def update_d_and_reset(self, group):
         k = group['k']
+        prodigy_steps = group['prodigy_steps']
+        
+        if prodigy_steps > 0 and k >= prodigy_steps:
+            return
+
         beta1, beta2 = group['betas']
         beta3, beta4 = group['beta3'], group['beta4']
         
@@ -301,7 +306,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d = group['d']
         d0 = group['d0']
         d_coef = group['d_coef']
-        prodigy_steps = group['prodigy_steps']
 
         d_numerator = group['d_numerator']
         d_numerator *= beta3
@@ -315,7 +319,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         if d_numerator_item > 0 or d > d0:
             d_numerator = max(0, d_numerator + d_numerator_item)
 
-        if d_denom_item > 0 and (prodigy_steps <= 0 or k < prodigy_steps):
+        if d_denom_item > 0:
             d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d)
             d = d * beta4 + d_hat * (1 - beta4) if beta4 > 0 else d_hat
         
@@ -368,6 +372,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d0 = group['d0']
 
             factored = group['factored']
+            prodigy_steps = group['prodigy_steps']
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
@@ -389,10 +394,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             one_minus_beta2_d = d * d * (1 - beta2)
 
             grad = p.grad.float()
-            y, z, s = p, state['z'], state['s']
-
-            sliced_grad = self.get_sliced_tensor(grad)
-            sliced_data = self.get_sliced_tensor(z)
+            y, z = p, state['z']
                 
             exp_avg_sq = state['exp_avg_sq']
 
@@ -413,14 +415,25 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
                 denom = exp_avg_sq.sqrt()
 
-            x0_minus = state['p0'].float() - sliced_data.float()
-            self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
-            del x0_minus
-            
-            s.mul_(beta3).add_(sliced_grad, alpha=d_update)
-            self.running_d_denom.add_(s.abs().sum())
+            if prodigy_steps <= 0 or k < prodigy_steps:
+                s = state['s']
+                sliced_grad = self.get_sliced_tensor(grad)
+                sliced_data = self.get_sliced_tensor(z)
+
+                x0_minus = state['p0'].float() - sliced_data.float()
+                self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+                del x0_minus
+                
+                s.mul_(beta3).add_(sliced_grad, alpha=d_update)
+                self.running_d_denom.add_(s.abs().sum())
+            elif 's' in state: # Free the memory used by Prodigy, as we no longer need it.
+                del state['s']
+                del state['p0']
 
             if is_first_param_for_group:
+                if prodigy_steps > 0 and k == prodigy_steps:
+                    print(f"[Prodigy+ScheduleFree] Prodigy stepsize adaptation disabled after {k} steps for param_group {group_index}.")
+
                 lr_max = group['lr_max'] = max(dlr, group['lr_max'])
                 weight = lr_max ** 2
                 weight_sum = group['weight_sum'] = group['weight_sum'] + weight
