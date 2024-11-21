@@ -244,18 +244,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             return None
         sorted_dims = sorted(((x, i) for i, x in enumerate(shape)))
         return int(sorted_dims[-2][1]), int(sorted_dims[-1][1])
-
-    @torch.no_grad()
-    def denom_from_state(self, exp_avg_sq):
-        # Implicit detection of factored mode and single dim tensors.
-        if isinstance(exp_avg_sq, list):
-            row_var, col_var, _, _, reduce_dc = exp_avg_sq
-            row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True)
-            row_factor = row_var.div(row_col_mean).sqrt_()
-            col_factor = col_var.sqrt()
-            return row_factor * col_factor
-
-        return exp_avg_sq.sqrt()
     
     @torch.no_grad()
     def initialise_state(self, p, state, factored, bf16_state=True):
@@ -410,13 +398,20 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             # Adam EMA updates
             if isinstance(exp_avg_sq, list):
+                row_var, col_var, dr, dc, reduce_dc = exp_avg_sq
+
                 grad_sqr = grad.square().add_(1e-30)
-                row_var, col_var, dr, dc, _ = exp_avg_sq
                 row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
                 col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
                 del grad_sqr
+
+                row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True)
+                row_factor = row_var.div(row_col_mean).sqrt_()
+                col_factor = col_var.sqrt()
+                denom = row_factor * col_factor
             else:
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
+                denom = exp_avg_sq.sqrt()
 
             x0_minus = state['p0'].float() - sliced_data.float()
             self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
@@ -437,8 +432,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             ckp1 = weight / weight_sum if weight_sum else 0
 
             weight_decay = group['weight_decay']
-
-            denom = self.denom_from_state(exp_avg_sq)
+            
             if eps is None:
                 update = grad.mul_(d)
 
