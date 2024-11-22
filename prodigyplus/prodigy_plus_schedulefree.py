@@ -162,8 +162,17 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.shared_d = None
         self.fused_back_pass = fused_back_pass
 
-        self.running_d_numerator = None
-        self.running_d_denom = None
+        # Use tensors to keep everything on device during parameter loop.
+        if split_groups:
+            for group in self.param_groups:
+                p = group['params'][0]
+                group['running_d_numerator'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+                group['running_d_denom'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+        else:
+            group = self.param_groups[0]
+            p = group['params'][0]
+            group['running_d_numerator'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
+            group['running_d_denom'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
 
     @torch.no_grad()
     def eval(self):
@@ -206,6 +215,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     def get_sliced_tensor(self, tensor, slice_p=11):
         return tensor.ravel()[::slice_p]
    
+    @torch.no_grad()
+    def get_running_values_for_group(self, group):
+        if not self.split_groups:
+            group = self.param_groups[0]
+        return group['running_d_numerator'], group['running_d_denom']
+
     @torch.no_grad()
     def get_d_mean(self, groups, mode):
         if mode is None:
@@ -305,11 +320,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         d0 = group['d0']
         d_coef = group['d_coef']
 
+        running_d_numerator, running_d_denom = self.get_running_values_for_group(group)
+
         d_numerator = group['d_numerator']
         d_numerator *= beta3
 
-        d_numerator_item = self.running_d_numerator.item()
-        d_denom_item = self.running_d_denom.item()
+        d_numerator_item = running_d_numerator.item()
+        d_denom_item = running_d_denom.item()
 
         # Prevent the accumulation of negative values in the numerator in early training.
         # We still allow negative updates once progress starts being made, as this is 
@@ -324,8 +341,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         group['d'] = d
         group['d_numerator'] = d_numerator
 
-        self.running_d_numerator.zero_()
-        self.running_d_denom.zero_()
+        running_d_numerator.zero_()
+        running_d_denom.zero_()
 
     @torch.no_grad()
     def step_param(self, p, group):
@@ -335,10 +352,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         if self.groups_to_process is None:
             # Optimiser hasn't run yet, so initialise.
             self.groups_to_process = {i: len(group['params']) for i, group in enumerate(self.param_groups)}
-
-            # Use tensors to keep everything on device during parameter loop.
-            self.running_d_numerator = torch.tensor(0.0, dtype=torch.float32, device=p.device)
-            self.running_d_denom = torch.tensor(0.0, dtype=torch.float32, device=p.device)
         elif len(self.groups_to_process) == 0:
             # Start of new optimiser run, so grab updated d.
             self.groups_to_process = {i: len(group['params']) for i, group in enumerate(self.param_groups)}
@@ -354,6 +367,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         k = group['k']
         group_index = self.param_groups.index(group)
+
+        running_d_numerator, running_d_denom = self.get_running_values_for_group(group)
 
         if p.grad is not None:
             lr = group['lr']
@@ -420,11 +435,11 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 sliced_data = self.get_sliced_tensor(z)
 
                 x0_minus = state['p0'].float() - sliced_data.float()
-                self.running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
+                running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
                 del x0_minus
                 
                 s.mul_(beta3).add_(sliced_grad, alpha=d_update)
-                self.running_d_denom.add_(s.abs().sum())
+                running_d_denom.add_(s.abs().sum())
             elif 's' in state: # Free the memory used by Prodigy, as we no longer need it.
                 del state['s']
                 del state['p0']
