@@ -469,13 +469,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if prodigy_steps > 0 and k == prodigy_steps:
                 print(f"[Prodigy+ScheduleFree] Prodigy stepsize adaptation disabled after {k} steps for param_group {group_index}.")
 
+            self.groups_to_process.pop(group_index)
+            if self.split_groups: # When groups are split, calculate per-group d.
+                self.update_d_and_reset(group)
+
             group['k'] = k + 1
             group['weight_sum'] = weight_sum
-
-            self.groups_to_process.pop(group_index)
-            if self.split_groups:
-                # When groups are split, calculate per-group d.
-                self.update_d_and_reset(group)
 
     @torch.no_grad()
     def step_parameter(self, p, group, i):
