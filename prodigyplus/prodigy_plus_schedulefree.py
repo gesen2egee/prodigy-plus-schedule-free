@@ -137,12 +137,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         eps=eps,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
-                        k=1,initialised=None,
-                        train_mode=True,
+                        k=1, train_mode=False,
                         weight_sum=0,
                         prodigy_steps=prodigy_steps,
                         warmup_steps=warmup_steps,
-                        lr_max=-1,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored,
@@ -355,9 +353,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
 
         k = group['k']
-
         group_index = self.param_groups.index(group)
-        is_first_param_for_group = self.groups_to_process[group_index] == len(group['params'])
 
         if p.grad is not None:
             lr = group['lr']
@@ -433,18 +429,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 del state['s']
                 del state['p0']
 
-            if is_first_param_for_group:
-                if prodigy_steps > 0 and k == prodigy_steps:
-                    print(f"[Prodigy+ScheduleFree] Prodigy stepsize adaptation disabled after {k} steps for param_group {group_index}.")
-
-                lr_max = group['lr_max'] = max(dlr, group['lr_max'])
-                weight = lr_max ** 2
-                weight_sum = group['weight_sum'] = group['weight_sum'] + weight
-            else:
-                lr_max = group['lr_max']
-                weight = lr_max ** 2
-                weight_sum = group['weight_sum']
-
+            weight = dlr ** 2
+            weight_sum = group['weight_sum'] + weight
             ckp1 = weight / weight_sum if weight_sum else 0
 
             weight_decay = group['weight_decay']
@@ -480,7 +466,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         # End of param loop for group, update calculations.
         if self.groups_to_process[group_index] == 0:
+            if prodigy_steps > 0 and k == prodigy_steps:
+                print(f"[Prodigy+ScheduleFree] Prodigy stepsize adaptation disabled after {k} steps for param_group {group_index}.")
+
             group['k'] = k + 1
+            group['weight_sum'] = weight_sum
+
             self.groups_to_process.pop(group_index)
             if self.split_groups:
                 # When groups are split, calculate per-group d.
