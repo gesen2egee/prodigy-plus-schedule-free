@@ -463,7 +463,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             else:
                 update = grad.div_(denom.add_(d * eps)).mul_(d)
                 if group['use_stableadamw']:
-                    rms = update.norm().div(grad.numel() ** 0.5).clamp_min(1.0)
+                    rms = update.norm().div(update.numel() ** 0.5).clamp_min(1.0)
                     update.div_(rms)
 
             # Weight decay.
