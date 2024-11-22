@@ -1,5 +1,8 @@
 from setuptools import setup, find_packages
 
+with open('README.md') as f:
+    README = f.read()
+
 setup(
   name = 'prodigy-plus-schedule-free',
   packages = find_packages(exclude=[]),
@@ -8,6 +11,7 @@ setup(
   description = 'Prodigy + ScheduleFree',
   author = 'Logan Booker',
   author_email = 'me@loganbooker.dev',
+  long_description=README,
   long_description_content_type = 'text/markdown',
   url = 'https://github.com/LoganBooker/prodigy-plus-schedule-free',
   keywords = [
