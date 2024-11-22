@@ -413,13 +413,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if isinstance(exp_avg_sq, list):
                 row_var, col_var, dr, dc, reduce_dc = exp_avg_sq
 
-                row_var.mul_(beta2).add_(
-                    grad.norm(dim=dr, keepdim=True).square_().add_(1e-30).div_(grad.shape[dr]), 
-                alpha=one_minus_beta2_d)
-
-                col_var.mul_(beta2).add_(
-                    grad.norm(dim=dc, keepdim=True).square_().add_(1e-30).div_(grad.shape[dc]), 
-                alpha=one_minus_beta2_d)
+                grad_sqr = grad.square().add_(1e-30)
+                row_var.mul_(beta2).add_(grad_sqr.mean(dim=dr, keepdim=True), alpha=one_minus_beta2_d)
+                col_var.mul_(beta2).add_(grad_sqr.mean(dim=dc, keepdim=True), alpha=one_minus_beta2_d)
+                del grad_sqr
 
                 row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True)
                 row_factor = row_var.div(row_col_mean).sqrt_()
