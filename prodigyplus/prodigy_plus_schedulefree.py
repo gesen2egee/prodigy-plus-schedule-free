@@ -137,7 +137,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         eps=eps,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
-                        k=1, train_mode=False,
+                        k=1, train_mode=True,
                         weight_sum=0,
                         prodigy_steps=prodigy_steps,
                         warmup_steps=warmup_steps,
