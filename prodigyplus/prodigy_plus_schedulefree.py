@@ -395,6 +395,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
 
         k = group['k']
+        prodigy_steps = group['prodigy_steps']
+        
         group_index = self.param_groups.index(group)
 
         running_d_numerator, running_d_denom = self.get_running_values_for_group(group)
@@ -412,7 +414,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             d0 = group['d0']
 
             factored = group['factored']
-            prodigy_steps = group['prodigy_steps']
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
