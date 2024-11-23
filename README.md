@@ -56,6 +56,16 @@ in terms of finding a good LR, which it usually achieves after ~25% of training,
 This setting can be particularly helpful when training diffusion models, which have very different gradient behaviour than what most optimisers are tuned for. 
 Prodigy in particular will increase the LR forever if it is not stopped or capped in some way (usually via a decaying LR scheduler).
 
+## Experimental features
+
+**Adam-atan2:** Enabled by setting `eps` to `None`. Outlined in [Scaling Exponents Across Parameterizations and Optimizers](https://arxiv.org/abs/2407.05872), 
+you can use atan2 in place of the regular division plus epsilon found in most Adam-style optimisers. This makes updates scale-invariant, and removes the need to tweak the epsilon.
+This seems to work fine in some models (SDXL), but cripples Prodigy's stepsize calculations in others (SD3.5 Medium and Large). Disabled by default.
+
+**Orthogonalisation post-processing:** Enabled by setting `use_muon_pp` to `True`. [As explained by Keller Jordan](https://x.com/kellerjordan0/status/1844782418676339059), and
+demonstrated (in various forms) by optimisers such as Shampoon, SOAP and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence/loss. However,
+this approach may not work in some situations (small batch sizes, fine-tuning) and as such, is disabled by default.
+
 ## Recommended usage
 
 First, try using the optimiser with `factored` set to `True`. If you don't encounter problems, great, you can enjoy the optimiser with significantly less memory usage!
