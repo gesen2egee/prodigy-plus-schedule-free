@@ -63,7 +63,7 @@ you can use atan2 in place of the regular division plus epsilon found in most Ad
 This seems to work fine in some models (SDXL), but cripples Prodigy's stepsize calculations in others (SD3.5 Medium and Large). Disabled by default.
 
 **Orthogonalisation post-processing:** Enabled by setting `use_muon_pp` to `True`. [As explained by Keller Jordan](https://x.com/kellerjordan0/status/1844782418676339059), and
-demonstrated (in various forms) by optimisers such as Shampoon, SOAP and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence/loss. However,
+demonstrated (in various forms) by optimisers such as Shampoo, SOAP and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence/loss. However,
 this approach may not work in some situations (small batch sizes, fine-tuning) and as such, is disabled by default.
 
 ## Recommended usage
