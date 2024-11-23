@@ -87,8 +87,9 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Set to None to have each group use its own learning rate calculation. 
             (default "harmonic_mean")
         factored (boolean):
-            Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage.
-            (default False)
+            Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage. Disable
+            if training results in NaNs or the learning rate fails to grow.
+            (default True)
         fused_back_pass (boolean):
             Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
             (default False)
@@ -111,7 +112,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  eps=1e-8,
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
-                 factored=False,
+                 factored=True,
                  fused_back_pass=False,
                  use_stableadamw=True,
                  use_muon_pp=False):
