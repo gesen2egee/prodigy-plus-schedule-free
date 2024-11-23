@@ -6,9 +6,9 @@ with open('README.md') as f:
 setup(
   name = 'prodigy-plus-schedule-free',
   packages = find_packages(exclude=[]),
-  version = '1.3.2',
+  version = '1.4.0',
   license='Apache 2.0',
-  description = 'Prodigy + ScheduleFree',
+  description = 'Automatic learning rate optimiser based on Prodigy and Schedule-Free',
   author = 'Logan Booker',
   author_email = 'me@loganbooker.dev',
   long_description=README,
