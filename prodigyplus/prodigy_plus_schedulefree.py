@@ -97,9 +97,13 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Stops the optimiser from running the normal step method. Set to True if using fused backward pass.
             (default False)
         use_stableadamw (boolean):
-            Ignored if eps is None. Scales parameter updates by the root-mean-square of the normalised gradient, in essence
-            identical to Adafactor's gradient scaling. Set to False if the adaptive learning rate never improves.
+            Scales parameter updates by the root-mean-square of the normalised gradient, in essence identical to 
+            Adafactor's gradient scaling. Set to False if the adaptive learning rate never improves.
             (default True)
+        use_muon_pp (boolean):
+            Experimental. Perform orthogonalisation post-processing on 2D+ parameter updates ala Shampoo/SOAP/Muon.
+            (https://github.com/KellerJordan/Muon/blob/master/muon.py). Not suitable for all training scenarios.
+            May not work well with small batch sizes or finetuning. (default False)
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -114,7 +118,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  factored=False,
                  fused_back_pass=False,
                  scale_atan2=False,
-                 use_stableadamw=True):
+                 use_stableadamw=True,
+                 use_muon_pp=False):
 
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -145,7 +150,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         d_numerator=0.0,
                         factored=factored,
                         scale_atan2=scale_atan2,
-                        use_stableadamw=use_stableadamw)
+                        use_stableadamw=use_stableadamw,
+                        use_muon_pp=use_muon_pp)
 
         super().__init__(params, defaults)
 
@@ -233,6 +239,29 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             return mean(group['d'] for group in groups)
         
         raise ValueError(f"Invalid value for split_groups_mean: '{mode}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
+
+    # From: https://github.com/KellerJordan/Muon/blob/master/muon.py
+    @torch.no_grad()
+    def newton_schulz(self, G, steps=6, eps=1e-16):
+        # Inline reshaping step within the method itself.
+        original_shape = None
+        if len(G.shape) > 2:
+            original_shape = G.shape
+            G = G.view(G.size(0), -1)
+        a, b, c = (3.4445, -4.7750,  2.0315)
+        X = G.bfloat16()
+        X /= (X.norm() + eps) # ensure top singular value <= 1
+        if G.size(0) > G.size(1):
+            X = X.T
+        for _ in range(steps):
+            A = X @ X.T
+            B = b * A + c * A @ A
+            X = a * X + B @ X
+        if G.size(0) > G.size(1):
+            X = X.T
+        if original_shape is not None:
+            X = X.view(*original_shape)
+        return X.float()
 
     # Modified Adafactor factorisation implementation by Ross Wightman 
     # https://github.com/huggingface/pytorch-image-models/pull/2320
@@ -462,9 +491,17 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                     update.atan2_(denom)
             else:
                 update = grad.div_(denom.add_(d * eps)).mul_(d)
-                if group['use_stableadamw']:
-                    rms = update.norm().div(update.numel() ** 0.5).clamp_min(1.0)
-                    update.div_(rms)
+
+            rms_min = None
+            if group['use_muon_pp'] and len(update.shape) >= 2 and update.size(0) < 10000:
+                update = self.newton_schulz(update)
+                rms_min = 1e-8
+            elif group['use_stableadamw']:
+                rms_min = 1.0
+
+            if rms_min is not None:
+                rms = update.norm().div(update.numel() ** 0.5).clamp_min(rms_min)
+                update.div_(rms)
 
             # Weight decay.
             update.add_(y, alpha=weight_decay)
