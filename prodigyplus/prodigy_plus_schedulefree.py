@@ -396,6 +396,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
         k = group['k']
         prodigy_steps = group['prodigy_steps']
+        weight_sum = group['weight_sum']
         
         group_index = self.param_groups.index(group)
 
@@ -474,7 +475,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 del state['p0']
 
             weight = dlr ** 2
-            weight_sum = group['weight_sum'] + weight
+            weight_sum = weight_sum + weight
             ckp1 = weight / weight_sum if weight_sum else 0
 
             weight_decay = group['weight_decay']
