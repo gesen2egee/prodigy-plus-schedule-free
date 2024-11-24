@@ -101,6 +101,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Experimental. Perform orthogonalisation post-processing on 2D+ parameter updates ala Shampoo/SOAP/Muon.
             (https://github.com/KellerJordan/Muon/blob/master/muon.py). Not suitable for all training scenarios.
             May not work well with small batch sizes or finetuning. (default False)
+        stochastic_rounding (boolean):
+            Use stochastic rounding for bfloat16 weights (https://github.com/pytorch/pytorch/issues/120376). Brings
+            bfloat16 training performance close to that of float32.
+            (default True)
     """
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None, beta4=0,
@@ -115,7 +119,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  factored=True,
                  fused_back_pass=False,
                  use_stableadamw=True,
-                 use_muon_pp=False):
+                 use_muon_pp=False,
+                 stochastic_rounding=True):
 
         if not 0.0 < d0:
             raise ValueError("Invalid d0 value: {}".format(d0))
@@ -146,7 +151,8 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         d_numerator=0.0,
                         factored=factored,
                         use_stableadamw=use_stableadamw,
-                        use_muon_pp=use_muon_pp)
+                        use_muon_pp=use_muon_pp,
+                        stochastic_rounding=stochastic_rounding)
 
         super().__init__(params, defaults)
 
@@ -256,7 +262,26 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             X = X.T
         if original_shape is not None:
             X = X.view(*original_shape)
-        return X.float()
+        return X.to(G.dtype)
+    
+    # Implementation by Nerogar. From: https://github.com/pytorch/pytorch/issues/120376#issuecomment-1974828905
+    def copy_stochastic_(self, target, source):
+        # create a random 16 bit integer
+        result = torch.randint_like(
+            source,
+            dtype=torch.int32,
+            low=0,
+            high=(1 << 16),
+        )
+
+        # add the random number to the lower 16 bit of the mantissa
+        result.add_(source.view(dtype=torch.int32))
+
+        # mask off the lower 16 bit of the mantissa
+        result.bitwise_and_(-65536)  # -65536 = FFFF0000 as a signed int32
+
+        # copy the higher 16 bit into the target tensor
+        target.copy_(result.view(dtype=torch.float32))
 
     # Modified Adafactor factorisation implementation by Ross Wightman 
     # https://github.com/huggingface/pytorch-image-models/pull/2320
@@ -456,10 +481,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 s = state['s']
-                sliced_grad = self.get_sliced_tensor(grad)
+                sliced_grad = self.get_sliced_tensor(p.grad) # Use original gradient
                 sliced_data = self.get_sliced_tensor(z)
 
-                x0_minus = state['p0'].float() - sliced_data.float()
+                x0_minus = state['p0'] - sliced_data
                 running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=d_update)
                 del x0_minus
                 
@@ -494,12 +519,29 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 rms = update.norm().div(update.numel() ** 0.5).clamp_min(rms_min)
                 update.div_(rms)
 
-            # Weight decay.
-            update.add_(y, alpha=weight_decay)
+            if group['stochastic_rounding'] and y.dtype == z.dtype == torch.bfloat16:
+                y_fp32, z_fp32 = y.float(), z.float()
 
-            y.lerp_(end=z, weight=ckp1)
-            y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
-            z.sub_(update, alpha=dlr)
+                # Weight decay.
+                if weight_decay != 0:
+                    update.add_(y_fp32, alpha=weight_decay)
+
+                y_fp32.lerp_(end=z_fp32, weight=ckp1)
+                y_fp32.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+                z_fp32.sub_(update, alpha=dlr)
+
+                self.copy_stochastic_(y, y_fp32)
+                self.copy_stochastic_(z, z_fp32)
+
+                del y_fp32, z_fp32
+            else:
+                # Weight decay.
+                if weight_decay != 0:
+                    update.add_(y, alpha=weight_decay)
+
+                y.lerp_(end=z, weight=ckp1)
+                y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+                z.sub_(update, alpha=dlr)
 
             del update, denom
 
