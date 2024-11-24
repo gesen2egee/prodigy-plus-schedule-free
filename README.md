@@ -41,8 +41,9 @@ It's recommended to use a higher `d0` (1e-5, 5e-5, 1e-4) so these networks don't
 
 For Prodigy's reference behaviour, which lumps all parameter groups together, set `split_groups` to `False`.
 
-To reduce memory usage, you can set `factored` to `True`. This uses low-rank approximations for the second moment, much like Adafactor. There
-should be little to no difference in training performance, but your mileage may vary.
+The optimiser uses low-rank approximations for the second moment, much like Adafactor. There should be little to no difference 
+in training performance, but your mileage may vary. If you encounter problems, you can try disabling factorisation by 
+setting `factored` to `False`.
 
 The optimiser also supports [fused backward pass](https://pytorch.org/tutorials/intermediate/optimizer_step_in_backward_tutorial.html) to significantly lower
 gradient memory usage. The `fused_back_pass` argument must be set to `True` so the optimiser knows not to perform the regular step. Please note however that 
@@ -67,9 +68,6 @@ demonstrated (in various forms) by optimisers such as Shampoo, SOAP and Jordan's
 this approach may not work in some situations (small batch sizes, fine-tuning) and as such, is disabled by default.
 
 ## Recommended usage
-
-First, try using the optimiser with `factored` set to `True`. If you don't encounter problems, great, you can enjoy the optimiser with significantly less memory usage!
-Otherwise, stick with the default settings.
  
 The schedule-free component of the optimiser works best with a constant learning rate. In most cases, Prodigy will find the optimal learning rate within the first
 25% of training, after which it may continue to increase the learning rate beyond what's best.
