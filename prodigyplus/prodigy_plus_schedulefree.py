@@ -170,13 +170,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         self.fused_back_pass = fused_back_pass
 
         # Use tensors to keep everything on device during parameter loop.
-        if split_groups:
-            for group in self.param_groups:
-                p = group['params'][0]
-                group['running_d_numerator'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
-                group['running_d_denom'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
-        else:
-            group = self.param_groups[0]
+        for group in (self.param_groups if self.split_groups else self.param_groups[:1]):
             p = group['params'][0]
             group['running_d_numerator'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
             group['running_d_denom'] = torch.tensor(0.0, dtype=torch.float32, device=p.device)
