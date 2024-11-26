@@ -11,12 +11,12 @@ pip install prodigy-plus-schedule-free
 ## Usage
 ```python
 from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
-optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.9, 0.99), beta3=None, beta4=0,
-                                    weight_decay=0.0, use_bias_correction=False, d0=1e-6, d_coef=1.0,
-                                    prodigy_steps=0, warmup_steps=0, eps=1e-8,
-                                    split_groups=True, split_groups_mean="harmonic_mean",
+optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.9, 0.99), beta3=None, 
+				    beta4=0, weight_decay=0.0, use_bias_correction=False, 
+				    d0=1e-6, d_coef=1.0, prodigy_steps=0, warmup_steps=0, 
+				    eps=1e-8, split_groups=True, split_groups_mean="harmonic_mean",
                                     factored=True, fused_back_pass=False, use_stableadamw=True,
-                                    use_muon_pp=False, stochastic_rounding=True)
+                                    use_muon_pp=False, use_cautious=False, stochastic_rounding=True)
 ```
 
 As with the reference implementation of schedule-free, a constant scheduler should be used, along with the appropriate
@@ -80,9 +80,13 @@ Prodigy in particular will increase the LR forever if it is not stopped or cappe
 you can use atan2 in place of the regular division plus epsilon found in most Adam-style optimisers. This makes updates scale-invariant, and removes the need to tweak the epsilon.
 This seems to work fine in some models (SDXL), but cripples Prodigy's stepsize calculations in others (SD3.5 Medium and Large). Disabled by default.
 
-**Orthogonalisation post-processing:** Enabled by setting `use_muon_pp` to `True`. [As explained by Keller Jordan](https://x.com/kellerjordan0/status/1844782418676339059), and
-demonstrated (in various forms) by optimisers such as Shampoo, SOAP and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence/loss. However,
+**Orthogonalisation:** Enabled by setting `use_muon_pp` to `True`. [As explained by Keller Jordan](https://x.com/kellerjordan0/status/1844782418676339059), and
+demonstrated (in various forms) by optimisers such as Shampoo, SOAP and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence. However,
 this approach may not work in some situations (small batch sizes, fine-tuning) and as such, is disabled by default.
+
+**C-Optim:** Enabled by setting `use_cautious` to `True`. Outlined in [Cautious Optimizers: Improving Training with One Line of Code](https://arxiv.org/pdf/2411.16085). 
+Applies a simple modification to parameter updates that promotes values that are aligned with the current gradient. This should result in faster convergence. Note that
+the proposed changes are not 1:1 compatible with schedule-free, so more testing is required.
 
 ## Recommended usage
  
