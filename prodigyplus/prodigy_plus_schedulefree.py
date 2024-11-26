@@ -1,6 +1,5 @@
 import math
 import torch
-import torch.optim
 from statistics import mean, harmonic_mean, geometric_mean
 
 class ProdigyPlusScheduleFree(torch.optim.Optimizer):
