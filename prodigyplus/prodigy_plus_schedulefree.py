@@ -510,7 +510,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 rms_min = 1.0
 
             if rms_min is not None:
-                rms = update.norm().div(update.numel() ** 0.5).clamp_min(rms_min)
+                rms = update.norm().div(update.numel() ** 0.5).add(rms_min)
                 update.div_(rms)
 
             if group['stochastic_rounding'] and y.dtype == z.dtype == torch.bfloat16:
