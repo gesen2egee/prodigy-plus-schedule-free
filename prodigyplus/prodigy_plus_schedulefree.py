@@ -388,6 +388,24 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         running_d_denom.zero_()
 
     @torch.no_grad()
+    def update_params(self, y, z, update, dlr, group):
+        # Weight decay.
+        weight_decay = group['weight_decay']
+
+        if weight_decay != 0:
+            update.add_(y, alpha=weight_decay)
+
+        weight = dlr ** 2
+        weight_sum = group['weight_sum'] + weight
+        ckp1 = weight / weight_sum if weight_sum else 0
+
+        y.lerp_(end=z, weight=ckp1)
+        y.add_(update, alpha=dlr * (group['betas'][0] * (1 - ckp1) - 1))
+        z.sub_(update, alpha=dlr)
+
+        return weight_sum
+    
+    @torch.no_grad()
     def step_param(self, p, group):
         if not group['train_mode']:
             raise Exception("Not in train mode!")
@@ -488,9 +506,6 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 del state['s']
                 del state['p0']
 
-            weight = dlr ** 2
-            weight_sum = weight_sum + weight
-            ckp1 = weight / weight_sum if weight_sum else 0
 
             weight_decay = group['weight_decay']
             
@@ -516,26 +531,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if group['stochastic_rounding'] and y.dtype == z.dtype == torch.bfloat16:
                 y_fp32, z_fp32 = y.float(), z.float()
 
-                # Weight decay.
-                if weight_decay != 0:
-                    update.add_(y_fp32, alpha=weight_decay)
-
-                y_fp32.lerp_(end=z_fp32, weight=ckp1)
-                y_fp32.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
-                z_fp32.sub_(update, alpha=dlr)
+                weight_sum = self.update_params(y_fp32, z_fp32, update, dlr, group)
 
                 self.copy_stochastic_(y, y_fp32)
                 self.copy_stochastic_(z, z_fp32)
 
                 del y_fp32, z_fp32
             else:
-                # Weight decay.
-                if weight_decay != 0:
-                    update.add_(y, alpha=weight_decay)
-
-                y.lerp_(end=z, weight=ckp1)
-                y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
-                z.sub_(update, alpha=dlr)
+                weight_sum = self.update_params(y, z, update, dlr, group)
 
             del update, denom
 
