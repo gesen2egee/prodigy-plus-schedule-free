@@ -101,6 +101,10 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             Experimental. Perform orthogonalisation post-processing on 2D+ parameter updates ala Shampoo/SOAP/Muon.
             (https://github.com/KellerJordan/Muon/blob/master/muon.py). Not suitable for all training scenarios.
             May not work well with small batch sizes or finetuning. (default False)
+        use_cautious (boolean):
+            Experimental. Perform "cautious" updates, as proposed in https://arxiv.org/pdf/2411.16085. Modifies
+            the update to isolate and boost values that align with the current gradient.
+            (default False)
         stochastic_rounding (boolean):
             Use stochastic rounding for bfloat16 weights (https://github.com/pytorch/pytorch/issues/120376). Brings
             bfloat16 training performance close to that of float32.
@@ -120,6 +124,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                  fused_back_pass=False,
                  use_stableadamw=True,
                  use_muon_pp=False,
+                 use_cautious=False,
                  stochastic_rounding=True):
 
         if not 0.0 < d0:
@@ -152,6 +157,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                         factored=factored,
                         use_stableadamw=use_stableadamw,
                         use_muon_pp=use_muon_pp,
+                        use_cautious=use_cautious,
                         stochastic_rounding=stochastic_rounding)
 
         super().__init__(params, defaults)
@@ -468,6 +474,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             y, z = p, state['z']
 
             grad = p.grad
+            grad_copy = grad.clone() if ['use_cautious'] else None
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 s = state['s']
@@ -531,6 +538,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if rms_min is not None:
                 rms = update.norm().div(update.numel() ** 0.5).add(rms_min)
                 update.div_(rms)
+
+            if grad_copy is not None:
+                # "Cautious Optimizer (C-Optim): Improving Training with One Line of Code"
+                # https://github.com/kyleliang919/c-optim
+                mask = update * grad_copy > 0
+                mask_scale = mask.numel() / mask.sum().add(1)
+                update.mul_(mask).mul_(mask_scale)
+                del grad_copy, mask
 
             if group['stochastic_rounding'] and y.dtype == z.dtype == torch.bfloat16:
                 y_fp32, z_fp32 = y.float(), z.float()
