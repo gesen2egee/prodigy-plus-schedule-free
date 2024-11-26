@@ -178,28 +178,28 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
     @torch.no_grad()
     def eval(self):
         for group in self.param_groups:
-            train_mode = group['train_mode']
+            if not group['train_mode']:
+                continue
             beta1, _ = group['betas']
-            if train_mode:
-                for p in group['params']:
-                    state = self.state[p]
-                    if 'z' in state:
-                        # Set p to x
-                        p.lerp_(end=state['z'].to(device=p.device), weight=1 - 1 / beta1)
-                group['train_mode'] = False
+            for p in group['params']:
+                z = self.state[p].get('z')
+                if z is not None:
+                    # Set p to x
+                    p.lerp_(end=z.to(device=p.device), weight=1 - 1 / beta1)
+            group['train_mode'] = False
 
     @torch.no_grad()
     def train(self):
         for group in self.param_groups:
-            train_mode = group['train_mode']
+            if group['train_mode']:
+                continue
             beta1, _ = group['betas']
-            if not train_mode:
-                for p in group['params']:
-                    state = self.state[p]
-                    if 'z' in state:
-                        # Set p to y
-                        p.lerp_(end=state['z'].to(device=p.device), weight=1 - beta1)
-                group['train_mode'] = True
+            for p in group['params']:
+                z = self.state[p].get('z')
+                if z is not None:
+                    # Set p to y
+                    p.lerp_(end=z.to(device=p.device), weight=1 - beta1)
+            group['train_mode'] = True
 
     @property
     def supports_memory_efficient_fp16(self):
