@@ -237,7 +237,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
 
     # From: https://github.com/KellerJordan/Muon/blob/master/muon.py
     @torch.no_grad()
-    def newton_schulz(self, G, steps=6, eps=1e-16):
+    def newton_schulz_(self, G, steps=6, eps=1e-7):
         # Inline reshaping step within the method itself.
         original_shape = None
         if len(G.shape) > 2:
@@ -254,9 +254,12 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             X = a * X + B @ X
         if G.size(0) > G.size(1):
             X = X.T
+        if X is not G:
+            G.copy_(X)
+            del X
         if original_shape is not None:
-            X = X.view(*original_shape)
-        return X.to(G.dtype)
+            G = G.view(*original_shape)
+        return G
     
     # Implementation by Nerogar. From: https://github.com/pytorch/pytorch/issues/120376#issuecomment-1974828905
     def copy_stochastic_(self, target, source):
@@ -302,45 +305,49 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         return int(sorted_dims[-2][1]), int(sorted_dims[-1][1])
     
     @torch.no_grad()
-    def initialise_state(self, p, state, factored, bf16_state=True):
-        if p.grad is None or len(state) != 0:
-            return
-
-        grad = p.grad
-        dtype = torch.bfloat16 if bf16_state and p.dtype is torch.float32 else p.dtype
-        sliced_data = self.get_sliced_tensor(p)
-
-        state['z'] = p.detach().clone(memory_format=torch.preserve_format)
-
-        factored_dims = self.factored_dims(
-            grad.shape,
-            factored=factored,
-            min_dim_size_to_factor=32
-        )
-
-        if factored_dims is not None:
-            dc, dr = factored_dims
-            row_shape = list(p.grad.shape)
-            row_shape[dr] = 1
-            col_shape = list(p.grad.shape)
-            col_shape[dc] = 1
-            reduce_dc = dc - 1 if dc > dr else dc
-            # Store reduction variables so we don't have to recalculate each step.
-            # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
-            # between bf16/fp16 and fp32 is negligible here.
-            state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
-                                   torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
-                                   dr, dc, reduce_dc]
-        else:
-            state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
+    def initialise_state(self, p, factored, use_muon_pp):
+        state = self.state[p]
         
-        # If the initial weights are zero, don't bother storing them.
-        if p.count_nonzero() > 0:
-            state['p0'] = sliced_data.to(dtype=dtype, memory_format=torch.preserve_format, copy=True).detach()
-        else:
-            state['p0'] = torch.tensor(0.0, dtype=dtype, device=p.device)
+        if len(state) == 0:
+            grad = p.grad
+            dtype = torch.bfloat16 if p.dtype == torch.float32 else p.dtype
+            sliced_data = self.get_sliced_tensor(p)
+
+            state['z'] = p.detach().clone(memory_format=torch.preserve_format)
+            state['muon'] = use_muon_pp and len(grad.shape) >= 2 and grad.size(0) < 10000
+
+            if not state['muon']:
+                factored_dims = self.factored_dims(
+                    grad.shape,
+                    factored=factored,
+                    min_dim_size_to_factor=32
+                )
+
+                if factored_dims is not None:
+                    dc, dr = factored_dims
+                    row_shape = list(p.grad.shape)
+                    row_shape[dr] = 1
+                    col_shape = list(p.grad.shape)
+                    col_shape[dc] = 1
+                    reduce_dc = dc - 1 if dc > dr else dc
+                    # Store reduction variables so we don't have to recalculate each step.
+                    # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
+                    # between bf16/fp16 and fp32 is negligible here.
+                    state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
+                                           torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
+                                           dr, dc, reduce_dc]
+                else:
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
+            
+            # If the initial weights are zero, don't bother storing them.
+            if p.count_nonzero() > 0:
+                state['p0'] = sliced_data.to(dtype=dtype, memory_format=torch.preserve_format, copy=True).detach()
+            else:
+                state['p0'] = torch.tensor(0.0, dtype=dtype, device=p.device)
+            
+            state['s'] = torch.zeros_like(sliced_data, memory_format=torch.preserve_format, dtype=dtype).detach()
         
-        state['s'] = torch.zeros_like(sliced_data, memory_format=torch.preserve_format, dtype=dtype).detach()
+        return state
 
     @torch.no_grad()
     def update_d_and_reset(self, group):
@@ -437,16 +444,15 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
         if p.grad is not None:
             lr = group['lr']
 
-            beta1, beta2 = group['betas']
+            _, beta2 = group['betas']
             beta3 = group['beta3']
             eps = group['eps']
 
             warmup_steps = group['warmup_steps']
+            rms_min = 1.0 if group['use_stableadamw'] else None
 
             d = group['d']
             d0 = group['d0']
-
-            factored = group['factored']
 
             if beta3 is None:
                 beta3 = beta2 ** 0.5
@@ -458,42 +464,14 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if k < warmup_steps:
                 dlr *= k / warmup_steps
 
-            # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
-            if group['use_bias_correction']:
-                beta2 = min(1 - k ** -0.8, beta2)
-
-            state = self.state[p]
-            self.initialise_state(p, state, factored)
-
-            one_minus_beta2_d = d * d * (1 - beta2)
-
-            grad = p.grad.float()
+            state = self.initialise_state(p, group['factored'], group['use_muon_pp'])
             y, z = p, state['z']
-                
-            exp_avg_sq = state['exp_avg_sq']
 
-            # Adam EMA updates
-            if isinstance(exp_avg_sq, list):
-                row_var, col_var, dr, dc, reduce_dc = exp_avg_sq
-
-                row_var.mul_(beta2).add_(
-                    grad.norm(dim=dr, keepdim=True).square_().div_(grad.shape[dr]), 
-                alpha=one_minus_beta2_d)
-                col_var.mul_(beta2).add_(
-                    grad.norm(dim=dc, keepdim=True).square_().div_(grad.shape[dc]), 
-                alpha=one_minus_beta2_d)
-                
-                row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True).add_(1e-30)
-                row_factor = row_var.div(row_col_mean).sqrt_()
-                col_factor = col_var.sqrt()
-                denom = row_factor * col_factor
-            else:
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
-                denom = exp_avg_sq.sqrt()
+            grad = p.grad
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 s = state['s']
-                sliced_grad = self.get_sliced_tensor(p.grad) # Use original gradient
+                sliced_grad = self.get_sliced_tensor(grad)
                 sliced_data = self.get_sliced_tensor(z)
 
                 x0_minus = state['p0'] - sliced_data
@@ -506,23 +484,49 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
                 del state['s']
                 del state['p0']
 
-
-            weight_decay = group['weight_decay']
-            
-            if eps is None:
-                # Adam-atan2. Use atan2 rather than epsilon and division 
-                # for parameter updates (https://arxiv.org/abs/2407.05872).
-                # Has the nice property of "clipping" the gradient as well.
-                update = grad.mul_(d).atan2_(denom)
+            if state['muon']:
+                # newton_schulz_ casts to bf16 internally, so do float cast afterwards.
+                update = self.newton_schulz_(grad).float()
+                rms_min = 1e-30
             else:
-                update = grad.div_(denom.add_(d * eps)).mul_(d)
+                grad = grad.float()
+                exp_avg_sq = state['exp_avg_sq']
 
-            rms_min = None
-            if group['use_muon_pp'] and len(update.shape) >= 2 and update.size(0) < 10000:
-                update = self.newton_schulz(update)
-                rms_min = 1e-8
-            elif group['use_stableadamw']:
-                rms_min = 1.0
+                # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
+                if group['use_bias_correction']:
+                    beta2 = min(1 - k ** -0.8, beta2)
+
+                one_minus_beta2_d = d * d * (1 - beta2)
+
+                # Adam EMA updates
+                if isinstance(exp_avg_sq, list):
+                    row_var, col_var, dr, dc, reduce_dc = exp_avg_sq
+
+                    row_var.mul_(beta2).add_(
+                        grad.norm(dim=dr, keepdim=True).square_().div_(grad.shape[dr]), 
+                    alpha=one_minus_beta2_d)
+                    col_var.mul_(beta2).add_(
+                        grad.norm(dim=dc, keepdim=True).square_().div_(grad.shape[dc]), 
+                    alpha=one_minus_beta2_d)
+                    
+                    row_col_mean = row_var.mean(dim=reduce_dc, keepdim=True).add_(1e-30)
+                    row_factor = row_var.div(row_col_mean).sqrt_()
+                    col_factor = col_var.sqrt()
+                    denom = row_factor * col_factor
+                else:
+                    exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
+                    denom = exp_avg_sq.sqrt()
+
+                if eps is None:
+                    # Adam-atan2. Use atan2 rather than epsilon and division 
+                    # for parameter updates (https://arxiv.org/abs/2407.05872).
+                    # Has the nice property of "clipping" the gradient as well.
+                    update = grad.mul_(d).atan2_(denom)
+                    rms_min = None
+                else:
+                    update = grad.div_(denom.add_(d * eps)).mul_(d)
+
+                del denom
 
             if rms_min is not None:
                 rms = update.norm().div(update.numel() ** 0.5).add(rms_min)
@@ -540,7 +544,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             else:
                 weight_sum = self.update_params(y, z, update, dlr, group)
 
-            del update, denom
+            del update
 
         # Decrement params processed so far.
         self.groups_to_process[group_index] -= 1
