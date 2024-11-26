@@ -3,6 +3,22 @@
 
 **Current status:** Experimental
 
+## Installation
+```
+pip install prodigy-plus-schedule-free
+```
+
+## Usage
+```python
+from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
+optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.90, 0.99), beta3=None, beta4=0,
+                                    weight_decay=0.0, use_bias_correction=False, d0=1e-6, d_coef=1.0,
+                                    prodigy_steps=0, warmup_steps=0, eps=1e-8,
+                                    split_groups=True, split_groups_mean="harmonic_mean",
+                                    factored=True, fused_back_pass=False, use_stableadamw=True,
+                                    use_muon_pp=False, stochastic_rounding=True)
+```
+
 ## Details
 An optimiser based on Prodigy that includes schedule-free logic and much, much lower memory usage, the aim being to remove the need to set any hyperparameters. Of course,
 that's never the case with any optimiser, but hopefully, this comes close!
@@ -28,7 +44,8 @@ Leave `lr` set to 1 unless you encounter instability. Do not use with gradient c
 ability for the optimiser to predict stepsizes. Gradient clipping/normalisation is already handled in the following configurations:
 
 1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon. This is the default.)
-2) `eps=None` (Adam-atan2, scale invariant, but can mess with Prodigy's stepsize calculations in some scenarios)
+2) `eps=None` (Adam-atan2, scale invariant, but can mess with Prodigy's stepsize calculations in some scenarios.)
+3) `use_muon_pp=True` (Updates are scaled by their root-mean-square. Experimental!)
 
 A new parameter, `beta4`, allows `d` to be updated via a moving average, rather than being immediately updated. This can help
 smooth out learning rate adjustments. Values of 0.9-0.99 are recommended if trying out the feature. If set to None, the 
