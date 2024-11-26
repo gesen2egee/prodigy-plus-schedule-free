@@ -11,13 +11,16 @@ pip install prodigy-plus-schedule-free
 ## Usage
 ```python
 from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
-optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.90, 0.99), beta3=None, beta4=0,
+optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.9, 0.99), beta3=None, beta4=0,
                                     weight_decay=0.0, use_bias_correction=False, d0=1e-6, d_coef=1.0,
                                     prodigy_steps=0, warmup_steps=0, eps=1e-8,
                                     split_groups=True, split_groups_mean="harmonic_mean",
                                     factored=True, fused_back_pass=False, use_stableadamw=True,
                                     use_muon_pp=False, stochastic_rounding=True)
 ```
+
+As with the reference implementation of schedule-free, a constant scheduler should be used, along with the appropriate
+calls to `optimizer.train()` and `optimizer.eval()`. See the schedule-free documentation for more details: https://github.com/facebookresearch/schedule_free
 
 ## Details
 An optimiser based on Prodigy that includes schedule-free logic and much, much lower memory usage, the aim being to remove the need to set any hyperparameters. Of course,
@@ -34,9 +37,6 @@ Incorporates improvements from these pull requests (credit to https://github.com
 * https://github.com/konstmish/prodigy/pull/23
 * https://github.com/konstmish/prodigy/pull/22
 * https://github.com/konstmish/prodigy/pull/20
-
-As with the reference implementation of schedule-free, a constant scheduler should be used, along with the appropriate
-calls to `train()` and `eval()`. See the schedule-free documentation for more details: https://github.com/facebookresearch/schedule_free
 
 If you do use another scheduler, linear or cosine is preferred, as a restarting scheduler can confuse Prodigy's adaptation logic.
 
