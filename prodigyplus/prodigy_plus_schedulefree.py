@@ -474,7 +474,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             y, z = p, state['z']
 
             grad = p.grad
-            grad_mask = grad > 0 if group['use_cautious'] else None
+            grad_mask = grad.clone() if group['use_cautious'] else None
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 s = state['s']
@@ -542,7 +542,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             if grad_mask is not None:
                 # "Cautious Optimizer (C-Optim): Improving Training with One Line of Code"
                 # https://github.com/kyleliang919/c-optim
-                mask = update * grad_mask
+                mask = update * grad_mask > 0
                 mask_scale = mask.numel() / mask.sum().add(1)
                 update.mul_(mask).mul_(mask_scale)
                 del grad_mask, mask
