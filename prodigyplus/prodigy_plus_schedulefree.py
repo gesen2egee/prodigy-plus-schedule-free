@@ -474,7 +474,7 @@ class ProdigyPlusScheduleFree(torch.optim.Optimizer):
             y, z = p, state['z']
 
             grad = p.grad
-            grad_mask = grad > 0 if ['use_cautious'] else None
+            grad_mask = grad > 0 if group['use_cautious'] else None
 
             if prodigy_steps <= 0 or k < prodigy_steps:
                 s = state['s']
