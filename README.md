@@ -16,7 +16,8 @@ optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.9, 0.99
 				    d0=1e-6, d_coef=1.0, prodigy_steps=0, warmup_steps=0, 
 				    eps=1e-8, split_groups=True, split_groups_mean="harmonic_mean",
                                     factored=True, fused_back_pass=False, use_stableadamw=True,
-                                    use_muon_pp=False, use_cautious=False, stochastic_rounding=True)
+                                    use_muon_pp=False, use_cautious=False, use_adopt=False, 
+				    stochastic_rounding=True)
 ```
 
 As with the reference implementation of schedule-free, a constant scheduler should be used, along with the appropriate
