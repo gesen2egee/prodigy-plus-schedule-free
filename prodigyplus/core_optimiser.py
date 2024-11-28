@@ -304,9 +304,6 @@ class CoreOptimiser(torch.optim.Optimizer):
             self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
 
     def on_end_step(self, group):
-        k = group['k']
-        prodigy_steps = group['prodigy_steps']
-       
         group_index = self.param_groups.index(group)
 
         # Decrement params processed so far.
@@ -314,6 +311,8 @@ class CoreOptimiser(torch.optim.Optimizer):
 
         # End of param loop for group, update calculations.
         if self.groups_to_process[group_index] == 0:
+            k = group['k']
+            prodigy_steps = group['prodigy_steps']
             if prodigy_steps > 0 and k == prodigy_steps:
                 print(f"[{self.__class__.__name__}] Prodigy stepsize adaptation disabled after {k} steps for param_group {group_index}.")
 
@@ -432,7 +431,7 @@ class CoreOptimiser(torch.optim.Optimizer):
         else:
             exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
 
-        return self.get_denom(state) if return_denom else None
+        return self.get_denom(state, group) if return_denom else None
         
     def rms_(self, tensor, rms_min):
         if rms_min is not None:
