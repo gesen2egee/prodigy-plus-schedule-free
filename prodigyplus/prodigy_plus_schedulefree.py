@@ -203,18 +203,18 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         weight_sum = group['weight_sum']
         
         if p.grad is not None:
-            dlr = self.get_dlr(group)
-
-            rms_min = 1.0 if group['use_stableadamw'] else None
-            use_adopt = group['use_adopt']
-            state = self.initialise_state(p, group['factored'], group['use_muon_pp'])
-            y, z = p, state['z']
-
             grad = p.grad
+
+            state = self.initialise_state(p, group['factored'], group['use_muon_pp'])
+            use_adopt = group['use_adopt']
 
             if use_adopt and group['k'] == 1:
                 self.update_second_moment(state, group, grad.float(), 0, return_denom=False)
             else:
+                dlr = self.get_dlr(group)
+                rms_min = 1.0 if group['use_stableadamw'] else None
+                y, z = p, state['z']
+
                 self.update_prodigy(state, group, grad, z, dlr)
 
                 grad_mask = grad.clone() if group['use_cautious'] else None
