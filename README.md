@@ -12,11 +12,12 @@ pip install prodigy-plus-schedule-free
 ```python
 from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
 optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.9, 0.99), beta3=None, 
-				    beta4=0, weight_decay=0.0, use_bias_correction=False, 
-				    d0=1e-6, d_coef=1.0, prodigy_steps=0, warmup_steps=0, 
-				    eps=1e-8, split_groups=True, split_groups_mean="harmonic_mean",
-                                    factored=True, fused_back_pass=False, use_stableadamw=True,
-                                    use_muon_pp=False, use_cautious=False, use_adopt=False, 
+				    beta4=0, weight_decay=0.0, weight_decay_by_lr=True, 
+					use_bias_correction=False, d0=1e-6, d_coef=1.0, 
+					prodigy_steps=0, warmup_steps=0, eps=1e-8, 
+					split_groups=True, split_groups_mean="harmonic_mean",
+                    factored=True, fused_back_pass=False, use_stableadamw=True,
+                    use_muon_pp=False, use_cautious=False, use_adopt=False, 
 				    stochastic_rounding=True)
 ```
 
@@ -27,8 +28,7 @@ calls to `optimizer.train()` and `optimizer.eval()`. See the schedule-free docum
 An optimiser based on Prodigy that includes schedule-free logic and much, much lower memory usage, the aim being to remove the need to set any hyperparameters. Of course,
 that's never the case with any optimiser, but hopefully, this comes close!
 
-Hyperparameters eliminated: Learning rate (Prodigy), LR scheduler (ScheduleFree), epsilon (Adam-atan2, optional, not enabled by default). Still working on betas and weight decay, though
-those are much harder.
+Hyperparameters eliminated: Learning rate (Prodigy), LR scheduler (ScheduleFree), epsilon (Adam-atan2, optional, not enabled by default).
 
 Based on code from:
 * https://github.com/facebookresearch/schedule_free
@@ -46,11 +46,6 @@ ability for the optimiser to predict stepsizes. Gradient clipping/normalisation 
 
 1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon. This is the default.)
 2) `eps=None` (Adam-atan2, scale invariant, but can mess with Prodigy's stepsize calculations in some scenarios.)
-3) `use_muon_pp=True` (Updates are scaled by their root-mean-square. Experimental!)
-
-A new parameter, `beta4`, allows `d` to be updated via a moving average, rather than being immediately updated. This can help
-smooth out learning rate adjustments. Values of 0.9-0.99 are recommended if trying out the feature. If set to None, the 
-square root of `beta1` is used, while a setting of 0 (the default) disables the feature.
 
 By default, `split_groups` is set to `True`, so each parameter group will have its own adaptation values. So if you're training
 different networks together, they won't contaminate each other's learning rates. The disadvantage of this approach is that some 
@@ -89,10 +84,12 @@ this approach may not work in some situations (small batch sizes, fine-tuning) a
 Applies a simple modification to parameter updates that promotes values that are aligned with the current gradient. This should result in faster convergence. Note that
 the proposed changes are not 1:1 compatible with schedule-free, so more testing is required.
 
+**ADOPT:** Enabled by setting `use_adopt` to `True`. A partial implementation of [ADOPT: Modified Adam Can Converge with Any β2 with the Optimal Rate](https://arxiv.org/abs/2411.02853), as we only update the second moment after the parameter update, so as to exclude the current gradient. Disabled by default.
+
 ## Recommended usage
  
 The schedule-free component of the optimiser works best with a constant learning rate. In most cases, Prodigy will find the optimal learning rate within the first
-25% of training, after which it may continue to increase the learning rate beyond what's best.
+25% of training, after which it may continue to increase the learning rate beyond what's best (this is mostly observed with diffusion training).
 
 It is strongly recommended to set `prodigy_steps` equal to 25% of your
 total step count, though you can experiment with values as little as 5-10%, depending on the model and type of training. The best way to figure out the best value
