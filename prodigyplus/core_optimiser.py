@@ -6,6 +6,7 @@ class CoreOptimiser(torch.optim.Optimizer):
     def __init__(self, params, lr=1.0,
                  betas=(0.9, 0.99), beta3=None,
                  weight_decay=0.0,
+                 weight_decay_by_lr=True,
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
                  prodigy_steps=0,
@@ -36,13 +37,10 @@ class CoreOptimiser(torch.optim.Optimizer):
         if split_groups_mean not in {None, "mean", "harmonic_mean", "geometric_mean"}:
             raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
-        if use_adopt and use_muon_pp:
-            print(f"[{self.__class__.__name__}] Muon and ADOPT cannot be used at the same time. Muon has been disabled.")
-            use_muon_pp = False
-
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         eps=eps,
                         weight_decay=weight_decay,
+                        weight_decay_by_lr=weight_decay_by_lr,
                         d=d0, d0=d0, d_coef=d_coef,
                         k=1, train_mode=True,
                         weight_sum=0,
@@ -190,11 +188,11 @@ class CoreOptimiser(torch.optim.Optimizer):
         return int(sorted_dims[-2][1]), int(sorted_dims[-1][1])
     
     @torch.no_grad()
-    def initialise_state(self, p, factored, use_muon_pp):
+    def initialise_state(self, p, group):
         raise Exception("Not implemented!")
 
     @torch.no_grad()
-    def initialise_state_internal(self, p, factored, use_muon_pp):
+    def initialise_state_internal(self, p, group):
         state = self.state[p]
         needs_init = len(state) == 0
         
@@ -204,37 +202,36 @@ class CoreOptimiser(torch.optim.Optimizer):
             sliced_data = self.get_sliced_tensor(p)
 
             # NOTE: We don't initialise z/exp_avg here -- subclass needs to do that.
-            state['muon'] = use_muon_pp and len(grad.shape) >= 2 and grad.size(0) < 10000
+            state['muon'] = group['use_muon_pp'] and len(grad.shape) >= 2 and grad.size(0) < 10000
 
-            if not state['muon']:
-                factored_dims = self.factored_dims(
-                    grad.shape,
-                    factored=factored,
-                    min_dim_size_to_factor=32
-                )
+            factored_dims = self.factored_dims(
+                grad.shape,
+                factored=group['factored'],
+                min_dim_size_to_factor=32
+            )
 
-                if factored_dims is not None:
-                    dc, dr = factored_dims
-                    row_shape = list(p.grad.shape)
-                    row_shape[dr] = 1
-                    col_shape = list(p.grad.shape)
-                    col_shape[dc] = 1
-                    reduce_dc = dc - 1 if dc > dr else dc
-                    # Store reduction variables so we don't have to recalculate each step.
-                    # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
-                    # between bf16/fp16 and fp32 is negligible here.
-                    state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
-                                           torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
-                                           dr, dc, reduce_dc]
-                else:
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
+            if factored_dims is not None:
+                dc, dr = factored_dims
+                row_shape = list(p.grad.shape)
+                row_shape[dr] = 1
+                col_shape = list(p.grad.shape)
+                col_shape[dc] = 1
+                reduce_dc = dc - 1 if dc > dr else dc
+                # Store reduction variables so we don't have to recalculate each step.
+                # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
+                # between bf16/fp16 and fp32 is negligible here.
+                state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
+                                        torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
+                                        dr, dc, reduce_dc]
+            else:
+                state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
             
             # If the initial weights are zero, don't bother storing them.
-            if p.count_nonzero() > 0:
+            if p.any() > 0:
                 state['p0'] = sliced_data.to(dtype=dtype, memory_format=torch.preserve_format, copy=True).detach()
             else:
                 state['p0'] = torch.tensor(0.0, dtype=dtype, device=p.device)
-            
+
             state['s'] = torch.zeros_like(sliced_data, memory_format=torch.preserve_format, dtype=dtype).detach()
         
         return state, needs_init
@@ -247,7 +244,7 @@ class CoreOptimiser(torch.optim.Optimizer):
         if prodigy_steps > 0 and k >= prodigy_steps:
             return
 
-        _, beta2 = group['betas']
+        beta1, beta2 = group['betas']
         beta3 = group['beta3']
         
         if beta3 is None:
@@ -269,13 +266,18 @@ class CoreOptimiser(torch.optim.Optimizer):
         # We still allow negative updates once progress starts being made, as this is 
         # important for regulating the adaptive stepsize.
         if d_numerator_item > 0 or d > d0:
-            d_numerator = max(0, d_numerator + d_numerator_item)
+            # Force Prodigy to be extremely confident before increasing the LR when
+            # gradient and weights are aligned.
+            d_numerator = 0 if d_numerator_item < 0 else d_numerator + d_numerator_item
 
         if d_denom_item > 0:
             d = max(math.atan2(d_coef * d_numerator, d_denom_item), d)
-        
+
         group['d'] = d
         group['d_numerator'] = d_numerator
+
+        # Used for logging purposes only.
+        group['d_denom'] = d_denom_item
 
         running_d_numerator.zero_()
         running_d_denom.zero_()
@@ -328,13 +330,12 @@ class CoreOptimiser(torch.optim.Optimizer):
         d = group['d']
         dlr = (self.shared_d if self.split_groups and self.shared_d else d) * lr
 
-        # Apply warmup separate to the denom and numerator updates.
         if k < warmup_steps:
-            dlr *= k / warmup_steps  
+            dlr *= k / warmup_steps
         
         return dlr
 
-    def update_prodigy(self, state, group, grad, data, dlr):
+    def update_prodigy(self, state, group, grad, data):
         k = group['k']
         prodigy_steps = group['prodigy_steps']
         
@@ -346,38 +347,47 @@ class CoreOptimiser(torch.optim.Optimizer):
                 beta3 = group['betas'][1] ** 0.5
 
             sliced_grad = self.get_sliced_tensor(grad)
-            sliced_data = self.get_sliced_tensor(data)
+            sliced_data = self.get_sliced_tensor(data).float()
 
+            # Rescale Prodigy updates to compensate for the lost elements due to slicing.
+            # This is mostly for logging purposes and shouldn't change the functionality.
+            slice_scale = grad.numel() / sliced_grad.numel()
             running_d_numerator, running_d_denom = self.get_running_values_for_group(group)
 
             s = state['s']
+
             x0_minus = state['p0'] - sliced_data
-            running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=(d / d0) * dlr)
-            del x0_minus
-            
-            s.mul_(beta3).add_(sliced_grad, alpha=(d / d0) * dlr)
+            running_d_numerator.add_(torch.dot(sliced_grad, x0_minus), alpha=(d / d0) * d * slice_scale)
+
+            s.mul_(beta3).add_(sliced_grad, alpha=(d / d0) * d * slice_scale)
             running_d_denom.add_(s.abs().sum())
+
+            del x0_minus
         elif 's' in state: # Free the memory used by Prodigy, as we no longer need it.
             del state['s']
             del state['p0']
 
     def get_update(self, num, denom, group):
         d = group['d']
+        eps = group['eps']
+        
+        # Deviate from reference Prodigy -- rather than apply d to the EMAs, 
+        # apply directly before calculating the update to simplify the rest of the optimiser.
+        num.mul_(d)
+        denom.mul_(d * d)
 
-        if group['eps'] is None:
+        if eps is None:
             # Adam-atan2. Use atan2 rather than epsilon and division 
             # for parameter updates (https://arxiv.org/abs/2407.05872).
             # Has the nice property of "clipping" the gradient as well.
-            update = num.mul_(d).atan2_(denom)
+            update = num.atan2_(denom)
         else:
-            # Assume eps as already been added.
-            update = num.div_(denom).mul_(d)
+            update = num.div_(denom.add_(d * eps))
 
         return update
 
-    def get_denom(self, state, group):
+    def get_denom(self, state):
         exp_avg_sq = state['exp_avg_sq']
-        eps = group['eps']
 
          # Adam EMA updates
         if isinstance(exp_avg_sq, list):
@@ -389,63 +399,58 @@ class CoreOptimiser(torch.optim.Optimizer):
             denom = row_factor * col_factor
         else:
             denom = exp_avg_sq.sqrt()
-       
-        if eps is not None:
-            denom.add_(group['d'] * eps)
 
         return denom
-
-    def update_first_moment(self, exp_avg, group, grad):
-        d = group['d']
+   
+    def update_first_moment(self, state, group, grad):
+        exp_avg = state['exp_avg']
         beta1, _ = group['betas']
-       
-        exp_avg.mul_(beta1).add_(grad, value=d * (1 - beta1))
-        return exp_avg
-    
+
+        return exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+
     def update_second_moment(self, state, group, grad, beta2, return_denom=True):
-        d = group['d']
         exp_avg_sq = state['exp_avg_sq']
 
         # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
         if group['use_bias_correction']:
             beta2 = min(1 - group['k'] ** -0.8, beta2)
-
-        one_minus_beta2_d = d * d * (1 - beta2)
-    
+   
         # Adam EMA updates
         if isinstance(exp_avg_sq, list):
             row_var, col_var, dr, dc, _ = exp_avg_sq
 
-            row_var.mul_(beta2).add_(
-                grad.norm(dim=dr, keepdim=True).square_().div_(grad.shape[dr]), 
-            alpha=one_minus_beta2_d)
-            col_var.mul_(beta2).add_(
-                grad.norm(dim=dc, keepdim=True).square_().div_(grad.shape[dc]), 
-            alpha=one_minus_beta2_d)
+            row_var.lerp_(
+                grad.norm(dim=dr, keepdim=True).square_().div_(grad.shape[dr]),
+                weight=1 - beta2
+            )
+            col_var.lerp_(
+                grad.norm(dim=dc, keepdim=True).square_().div_(grad.shape[dc]),
+                weight=1 - beta2
+            )
         else:
-            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=one_minus_beta2_d)
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-        return self.get_denom(state, group) if return_denom else None
+        return self.get_denom(state) if return_denom else None
         
     def rms_(self, tensor, rms_min):
-        if rms_min is not None:
-            rms = tensor.norm().div(tensor.numel() ** 0.5).add(rms_min)
-            tensor.div_(rms)
-        return tensor
+        rms = tensor.norm().div(tensor.numel() ** 0.5).clamp_min(rms_min)
+        return tensor.div_(rms)
 
     # "Cautious Optimizer (C-Optim): Improving Training with One Line of Code"
     # https://github.com/kyleliang919/c-optim
-    def cautious_(self, update, grad, reuse_grad):
-        if reuse_grad:
-            mask = grad.mul_(update) > 0
-        else:
-            mask = grad.mul(update) > 0
-
-        mask_scale = mask.numel() / mask.sum().add(1)
-        update.mul_(mask).mul_(mask_scale)
+    # Modified version by Ross Wightman: https://x.com/wightmanr/status/1862226848475955442
+    def cautious_(self, update, grad):
+        mask = (grad * update > 0).to(dtype=grad.dtype)
+        mask.div_(mask.mean().clamp_min(1e-3))
+        update.mul_(mask)
         del mask
 
         return update
+    
+    def cautious_mask(self, update, grad):
+        mask = (grad * update > 0).to(dtype=grad.dtype)
+        mask.div_(mask.mean().clamp_min(1e-3))
+        return mask
 
     @torch.no_grad()
     def step_param(self, p, group):
