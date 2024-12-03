@@ -4,7 +4,7 @@ from statistics import mean, harmonic_mean, geometric_mean
 
 class CoreOptimiser(torch.optim.Optimizer):
     def __init__(self, params, lr=1.0,
-                 betas=(0.9, 0.99), beta3=None, beta4=0,
+                 betas=(0.9, 0.99), beta3=None,
                  weight_decay=0.0,
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
@@ -33,8 +33,6 @@ class CoreOptimiser(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if beta3 is not None and not 0.0 <= beta3 < 1.0:
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
-        if beta4 is not None and not 0.0 <= beta4 < 1.0:
-            raise ValueError("Invalid beta4 parameter: {}".format(beta4))
         if split_groups_mean not in {None, "mean", "harmonic_mean", "geometric_mean"}:
             raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
@@ -42,7 +40,7 @@ class CoreOptimiser(torch.optim.Optimizer):
             print(f"[{self.__class__.__name__}] Muon and ADOPT cannot be used at the same time. Muon has been disabled.")
             use_muon_pp = False
 
-        defaults = dict(lr=lr, betas=betas, beta3=beta3, beta4=beta4,
+        defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         eps=eps,
                         weight_decay=weight_decay,
                         d=d0, d0=d0, d_coef=d_coef,
@@ -249,14 +247,11 @@ class CoreOptimiser(torch.optim.Optimizer):
         if prodigy_steps > 0 and k >= prodigy_steps:
             return
 
-        beta1, beta2 = group['betas']
-        beta3, beta4 = group['beta3'], group['beta4']
+        _, beta2 = group['betas']
+        beta3 = group['beta3']
         
         if beta3 is None:
             beta3 = beta2 ** 0.5
-
-        if beta4 is None:
-            beta4 = beta1 ** 0.5
 
         d = group['d']
         d0 = group['d0']
@@ -277,8 +272,7 @@ class CoreOptimiser(torch.optim.Optimizer):
             d_numerator = max(0, d_numerator + d_numerator_item)
 
         if d_denom_item > 0:
-            d_hat = max(math.atan2(d_coef * d_numerator, d_denom_item), d)
-            d = d * beta4 + d_hat * (1 - beta4) if beta4 > 0 else d_hat
+            d = max(math.atan2(d_coef * d_numerator, d_denom_item), d)
         
         group['d'] = d
         group['d_numerator'] = d_numerator

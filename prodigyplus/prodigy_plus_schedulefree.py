@@ -27,10 +27,6 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
     1) `use_stableadamw=True,eps=1e8` (or any reasonable positive epsilon)
     2) `eps=None` (Adam-atan2, scale invariant and can mess with Prodigy's stepsize calculations in some scenarios)
 
-    A new parameter, `beta4`, allows `d` to be updated via a moving average, rather than being immediately updated. This can help
-    smooth out learning rate adjustments. Values of 0.9-0.99 are recommended if trying out the feature. If set to None, the 
-    square root of `beta1` is used, while a setting of 0 (the default) disables the feature.
-
     By default, `split_groups` is set to `True`, so each parameter group will have its own adaptation values. So if you're training
     different networks together, they won't contaminate each other's learning rates. The disadvantage of this approach is that some 
     networks can take a long time to reach a good learning rate when trained alongside others (for example, SDXL's Unet). 
@@ -56,9 +52,6 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         beta3 (float):
             Coefficient for computing the Prodigy stepsize using running averages.
             If set to None, uses the value of square root of beta2 (default: None).
-        beta4 (float):
-            Coefficient for updating the learning rate from Prodigy's adaptive stepsize. Smooths out spikes in learning rate adjustments. 
-            If set to None, beta1 is used instead. (default 0, which disables smoothing and uses original Prodigy behaviour).
         weight_decay (float):
             Decoupled weight decay. Value is multiplied by the adaptive learning rate.
             (default: 0).
@@ -114,7 +107,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
             (default True)
     """
     def __init__(self, params, lr=1.0,
-                 betas=(0.9, 0.99), beta3=None, beta4=0,
+                 betas=(0.9, 0.99), beta3=None,
                  weight_decay=0.0,
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
@@ -131,7 +124,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                  use_adopt=False,
                  stochastic_rounding=True):
 
-        super().__init__(params=params, lr=lr, betas=betas, beta3=beta3, beta4=beta4,
+        super().__init__(params=params, lr=lr, betas=betas, beta3=beta3,
                         weight_decay=weight_decay, use_bias_correction=use_bias_correction,
                         d0=d0, d_coef=d_coef, prodigy_steps=prodigy_steps,
                         warmup_steps=warmup_steps, eps=eps, split_groups=split_groups,
