@@ -10,7 +10,6 @@ class CoreOptimiser(torch.optim.Optimizer):
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
                  prodigy_steps=0,
-                 warmup_steps=0,
                  eps=1e-8,
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
@@ -45,7 +44,6 @@ class CoreOptimiser(torch.optim.Optimizer):
                         k=1, train_mode=True,
                         weight_sum=0,
                         prodigy_steps=prodigy_steps,
-                        warmup_steps=warmup_steps,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
                         factored=factored,
@@ -323,16 +321,10 @@ class CoreOptimiser(torch.optim.Optimizer):
 
     def get_dlr(self, group):
         lr = group['lr']
-        k = group['k']
-
-        warmup_steps = group['warmup_steps']
 
         d = group['d']
         dlr = (self.shared_d if self.split_groups and self.shared_d else d) * lr
-
-        if k < warmup_steps:
-            dlr *= k / warmup_steps
-        
+       
         return dlr
 
     def update_prodigy(self, state, group, grad, data):

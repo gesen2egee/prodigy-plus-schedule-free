@@ -77,9 +77,6 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
             Freeze Prodigy stepsize adjustments after a certain optimiser step and releases all state memory required
             by Prodigy.
             (default: 0)
-        warmup_steps (int):
-            Enables a linear learning rate warmup (default 0). Use this over the warmup settings of your LR scheduler.
-            (default: 0)
         split_groups (boolean):
             Track individual adaptation values for each parameter group. For example, if training
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
@@ -129,7 +126,6 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                  use_bias_correction=False,
                  d0=1e-6, d_coef=1.0,
                  prodigy_steps=0,
-                 warmup_steps=0,
                  eps=1e-8,
                  split_groups=True,
                  split_groups_mean="harmonic_mean",
@@ -143,8 +139,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         
         super().__init__(params=params, lr=lr, betas=betas, beta3=beta3,
                         weight_decay=weight_decay, weight_decay_by_lr=weight_decay_by_lr, use_bias_correction=use_bias_correction,
-                        d0=d0, d_coef=d_coef, prodigy_steps=prodigy_steps,
-                        warmup_steps=warmup_steps, eps=eps, split_groups=split_groups,
+                        d0=d0, d_coef=d_coef, prodigy_steps=prodigy_steps, eps=eps, split_groups=split_groups,
                         split_groups_mean=split_groups_mean, factored=factored,
                         fused_back_pass=fused_back_pass, use_stableadamw=use_stableadamw,
                         use_muon_pp=use_muon_pp, use_cautious=use_cautious, use_adopt=use_adopt,
