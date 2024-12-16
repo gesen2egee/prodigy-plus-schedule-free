@@ -182,29 +182,24 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
     
     @torch.no_grad()
     def update_params(self, y, z, update, dlr, group):
-        weight_decay = group['weight_decay']
+        decay = group['weight_decay']
         beta1, _ = group['betas']
 
         weight = self.get_d_max(group) ** 2
         weight_sum = group['weight_sum'] + weight
         ckp1 = weight / weight_sum if weight_sum else 0
 
+        y.lerp_(end=z, weight=ckp1)
+
         # Weight decay at Y.
-        if weight_decay != 0:
+        if decay != 0:
             if group['weight_decay_by_lr']:
-                weight_decay *= dlr
+                decay *= dlr
+            y.sub_(y, alpha=decay * (1 - beta1))
+            z.sub_(y, alpha=decay)
 
-            z.sub_(y, alpha=weight_decay)
-            y.sub_(y, alpha=weight_decay * (1 - beta1))
-
-        # Unextrapolate.
-        y.lerp_(end=z, weight=1 - 1 / beta1)
-
-        # Z-step
-        z.add_(update, alpha=-dlr)
-
-        # P-step plus extrapolation.
-        y.lerp_(end=z, weight=1 - (1 - ckp1) * beta1)
+        y.add_(update, alpha=dlr * (beta1 * (1 - ckp1) - 1))
+        z.sub_(update, alpha=dlr)
 
         return weight_sum
 
