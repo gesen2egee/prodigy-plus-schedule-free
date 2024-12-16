@@ -82,11 +82,11 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
             a text encoder beside a Unet. Note this can have a significant impact on training dynamics.
             Set to False for original Prodigy behaviour, where all groups share the same values.
             (default: True)
-        split_groups_mean (str: None, "mean", "harmonic_mean", "geometric_mean"):
-            When split_groups is True, use specified mean of learning rates for all groups. This favours
+        split_groups_mean (boolean):
+            When split_groups is True, use the harmonic mean of learning rates for all groups. This favours
             a more conservative LR. Calculation remains per-group. If split_groups is False, this value has no effect.
-            Set to None to have each group use its own learning rate. 
-            (default: "harmonic_mean")
+            Set to False to have each group use its own learning rate. 
+            (default: True)
         factored (boolean):
             Use factored approximation of the second moment, similar to Adafactor. Reduces memory usage. Disable
             if training results in NaNs or the learning rate fails to grow.
@@ -128,7 +128,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                  prodigy_steps=0,
                  eps=1e-8,
                  split_groups=True,
-                 split_groups_mean="harmonic_mean",
+                 split_groups_mean=True,
                  factored=True,
                  fused_back_pass=False,
                  use_stableadamw=True,

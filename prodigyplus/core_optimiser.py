@@ -12,7 +12,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                  prodigy_steps=0,
                  eps=1e-8,
                  split_groups=True,
-                 split_groups_mean="harmonic_mean",
+                 split_groups_mean=True,
                  factored=True,
                  fused_back_pass=False,
                  use_stableadamw=True,
@@ -33,8 +33,6 @@ class CoreOptimiser(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if beta3 is not None and not 0.0 <= beta3 < 1.0:
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
-        if split_groups_mean not in {None, "mean", "harmonic_mean", "geometric_mean"}:
-            raise ValueError(f"Invalid value for split_groups_mean: '{split_groups_mean}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
 
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         eps=eps,
@@ -104,18 +102,11 @@ class CoreOptimiser(torch.optim.Optimizer):
         return group['running_d_numerator'], group['running_d_denom']
 
     @torch.no_grad()
-    def get_d_mean(self, groups, mode):
-        if mode is None:
-            return None
-        elif mode == "harmonic_mean":
-            return harmonic_mean(group['d'] for group in groups)
-        elif mode == "geometric_mean":
-            return geometric_mean(group['d'] for group in groups)
-        elif mode == "mean":
-            return mean(group['d'] for group in groups)
-        
-        raise ValueError(f"Invalid value for split_groups_mean: '{mode}'. Must be one of {None, 'mean', 'harmonic_mean', 'geometric_mean'}")
-
+    def get_d_mean(self):
+        if self.split_groups and self.split_groups_mean:
+            return harmonic_mean(group['d'] for group in self.param_groups)
+        return None
+    
     # From: https://github.com/KellerJordan/Muon/blob/master/muon.py
     @torch.no_grad()
     def newton_schulz_(self, G, steps=6, eps=1e-7):
@@ -295,7 +286,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                 for g in self.param_groups:
                     g['d'] = group['d']
 
-            self.shared_d = self.get_d_mean(self.param_groups, self.split_groups_mean) if self.split_groups else None
+            self.shared_d = self.get_d_mean(self.param_groups) if self.split_groups else None
 
     def on_end_step(self, group):
         group_index = self.param_groups.index(group)
