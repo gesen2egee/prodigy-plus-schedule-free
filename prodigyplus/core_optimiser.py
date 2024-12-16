@@ -107,6 +107,12 @@ class CoreOptimiser(torch.optim.Optimizer):
             return harmonic_mean(group['d'] for group in self.param_groups)
         return None
     
+    @torch.no_grad()
+    def get_d_max(self, group):
+        if self.split_groups:
+            return max(group['d'] for group in self.param_groups)
+        return group['d']
+    
     # From: https://github.com/KellerJordan/Muon/blob/master/muon.py
     @torch.no_grad()
     def newton_schulz_(self, G, steps=6, eps=1e-7):

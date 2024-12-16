@@ -185,7 +185,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         weight_decay = group['weight_decay']
         beta1, _ = group['betas']
 
-        weight = dlr ** 2
+        weight = self.get_d_max(group) ** 2
         weight_sum = group['weight_sum'] + weight
         ckp1 = weight / weight_sum if weight_sum else 0
 
