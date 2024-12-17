@@ -1,6 +1,6 @@
 import math
 import torch
-from statistics import mean, harmonic_mean, geometric_mean
+from statistics import harmonic_mean
 
 class CoreOptimiser(torch.optim.Optimizer):
     def __init__(self, params, lr=1.0,
