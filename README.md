@@ -12,10 +12,10 @@ pip install prodigy-plus-schedule-free
 ```python
 from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
 optimizer = ProdigyPlusScheduleFree(model.parameters(), lr=1.0, betas=(0.9, 0.99), beta3=None, 
-                                    beta4=0, weight_decay=0.0, weight_decay_by_lr=True, 
+                                    weight_decay=0.0, weight_decay_by_lr=True, 
 				    use_bias_correction=False, d0=1e-6, d_coef=1.0, 
-				    prodigy_steps=0, warmup_steps=0, eps=1e-8, 
-				    split_groups=True, split_groups_mean="harmonic_mean",
+				    prodigy_steps=0, eps=1e-8, 
+				    split_groups=True, split_groups_mean=True,
  				    factored=True, fused_back_pass=False, use_stableadamw=True,
  				    use_muon_pp=False, use_cautious=False, use_adopt=False, 
 				    stochastic_rounding=True)
@@ -48,11 +48,8 @@ ability for the optimiser to predict stepsizes. Gradient clipping/normalisation 
 2) `eps=None` (Adam-atan2, scale invariant, but can mess with Prodigy's stepsize calculations in some scenarios.)
 
 By default, `split_groups` is set to `True`, so each parameter group will have its own adaptation values. So if you're training
-different networks together, they won't contaminate each other's learning rates. The disadvantage of this approach is that some 
-networks can take a long time to reach a good learning rate when trained alongside others (for example, SDXL's Unet). 
-It's recommended to use a higher `d0` (1e-5, 5e-5, 1e-4) so these networks don't get stuck at a low learning rate.
-
-For Prodigy's reference behaviour, which lumps all parameter groups together, set `split_groups` to `False`.
+different networks together, they won't contaminate each other's learning rates. For Prodigy's reference behaviour, which lumps all 
+parameter groups together, set `split_groups` to `False`.
 
 The optimiser uses low-rank approximations for the second moment, much like Adafactor. There should be little to no difference 
 in training performance, but your mileage may vary. If you encounter problems, you can try disabling factorisation by 
@@ -60,7 +57,7 @@ setting `factored` to `False`.
 
 The optimiser also supports [fused backward pass](https://pytorch.org/tutorials/intermediate/optimizer_step_in_backward_tutorial.html) to significantly lower
 gradient memory usage. The `fused_back_pass` argument must be set to `True` so the optimiser knows not to perform the regular step. Please note however that 
-your training scripts / UI of choice *must* support the feature for generic optimisers -- as of November 2024, popular trainers such as OneTrainer and Kohya 
+your training scripts / UI of choice *must* support the feature for generic optimisers -- as of December 2024, popular trainers such as OneTrainer and Kohya 
 hard-code which optimisers have fused backward pass support, and so this optimiser's fused pass will not work out of the box with them.
 
 In some scenarios, it can be advantageous to freeze Prodigy's adaptive stepsize after a certain number of steps. This
@@ -76,9 +73,10 @@ Prodigy in particular will increase the LR forever if it is not stopped or cappe
 you can use atan2 in place of the regular division plus epsilon found in most Adam-style optimisers. This makes updates scale-invariant, and removes the need to tweak the epsilon.
 This seems to work fine in some models (SDXL), but cripples Prodigy's stepsize calculations in others (SD3.5 Medium and Large). Disabled by default.
 
-**Orthogonalisation:** Enabled by setting `use_muon_pp` to `True`. [As explained by Keller Jordan](https://x.com/kellerjordan0/status/1844782418676339059), and
-demonstrated (in various forms) by optimisers such as Shampoo, SOAP and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence. However,
-this approach may not work in some situations (small batch sizes, fine-tuning) and as such, is disabled by default.
+**Orthogonalisation:** Enabled by setting `use_muon_pp` to `True`. This changes the base behaviour of the optimiser for compatible parameters from AdamW to SGD.
+[As explained by Keller Jordan](https://x.com/kellerjordan0/status/1844782418676339059), and demonstrated (in various forms) by optimisers such as Shampoo, SOAP 
+and Jordan's Muon, applying orthogonalisation/preconditioning can improve convergence. However, this approach may not work in some situations 
+(small batch sizes, fine-tuning) and as such, is disabled by default.
 
 **C-Optim:** Enabled by setting `use_cautious` to `True`. Outlined in [Cautious Optimizers: Improving Training with One Line of Code](https://arxiv.org/pdf/2411.16085). 
 Applies a simple modification to parameter updates that promotes values that are aligned with the current gradient. This should result in faster convergence. Note that
