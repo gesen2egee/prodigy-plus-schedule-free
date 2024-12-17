@@ -34,6 +34,9 @@ class CoreOptimiser(torch.optim.Optimizer):
         if beta3 is not None and not 0.0 <= beta3 < 1.0:
             raise ValueError("Invalid beta3 parameter: {}".format(beta3))
 
+        if beta3 is None:
+            beta3 = betas[1] ** 0.5
+
         defaults = dict(lr=lr, betas=betas, beta3=beta3,
                         eps=eps,
                         weight_decay=weight_decay,
@@ -236,15 +239,10 @@ class CoreOptimiser(torch.optim.Optimizer):
         if prodigy_steps > 0 and k >= prodigy_steps:
             return
 
-        beta1, beta2 = group['betas']
-        beta3 = group['beta3']
-        
-        if beta3 is None:
-            beta3 = beta2 ** 0.5
-
         d = group['d']
         d0 = group['d0']
         d_coef = group['d_coef']
+        beta3 = group['beta3']
 
         running_d_numerator, running_d_denom = self.get_running_values_for_group(group)
 
@@ -328,9 +326,6 @@ class CoreOptimiser(torch.optim.Optimizer):
         if prodigy_steps <= 0 or k < prodigy_steps:
             d, d0 = group['d'], group['d0']
             beta3 = group['beta3']
-
-            if beta3 is None:
-                beta3 = group['betas'][1] ** 0.5
 
             sliced_grad = self.get_sliced_tensor(grad)
             sliced_data = self.get_sliced_tensor(data).float()
