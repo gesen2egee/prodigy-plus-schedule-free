@@ -47,6 +47,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                         prodigy_steps=prodigy_steps,
                         use_bias_correction=use_bias_correction,
                         d_numerator=0.0,
+                        d_denom=0,
                         factored=factored,
                         use_stableadamw=use_stableadamw,
                         use_muon_pp=use_muon_pp,
