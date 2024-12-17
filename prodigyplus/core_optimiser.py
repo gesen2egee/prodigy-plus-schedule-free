@@ -289,7 +289,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                 for g in self.param_groups:
                     g['d'] = group['d']
 
-            self.shared_d = self.get_d_mean(self.param_groups) if self.split_groups else None
+            self.shared_d = self.get_d_mean()
 
     def on_end_step(self, group):
         group_index = self.param_groups.index(group)
