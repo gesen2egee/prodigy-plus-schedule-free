@@ -138,12 +138,14 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                  stochastic_rounding=True):
         
         super().__init__(params=params, lr=lr, betas=betas, beta3=beta3,
-                        weight_decay=weight_decay, weight_decay_by_lr=weight_decay_by_lr, use_bias_correction=use_bias_correction,
-                        d0=d0, d_coef=d_coef, prodigy_steps=prodigy_steps, eps=eps, split_groups=split_groups,
-                        split_groups_mean=split_groups_mean, factored=factored,
-                        fused_back_pass=fused_back_pass, use_stableadamw=use_stableadamw,
-                        use_muon_pp=use_muon_pp, use_cautious=use_cautious, use_adopt=use_adopt,
-                        stochastic_rounding=stochastic_rounding)
+                         weight_decay=weight_decay, weight_decay_by_lr=weight_decay_by_lr,
+                         use_bias_correction=use_bias_correction,
+                         d0=d0, d_coef=d_coef, prodigy_steps=prodigy_steps,
+                         eps=eps, split_groups=split_groups,
+                         split_groups_mean=split_groups_mean, factored=factored,
+                         fused_back_pass=fused_back_pass, use_stableadamw=use_stableadamw,
+                         use_muon_pp=use_muon_pp, use_cautious=use_cautious, use_adopt=use_adopt,
+                         stochastic_rounding=stochastic_rounding)
 
     @torch.no_grad()
     def eval(self):
