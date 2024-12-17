@@ -110,13 +110,13 @@ class CoreOptimiser(torch.optim.Optimizer):
         if self.split_groups and self.split_groups_mean:
             return harmonic_mean(group['d'] for group in self.param_groups)
         return None
-    
+
     @torch.no_grad()
     def get_d_max(self, group):
         if self.split_groups:
             return max(group['d'] for group in self.param_groups)
         return group['d']
-    
+
     # From: https://github.com/KellerJordan/Muon/blob/master/muon.py
     @torch.no_grad()
     def newton_schulz_(self, G, steps=5, eps=1e-7):
@@ -200,28 +200,29 @@ class CoreOptimiser(torch.optim.Optimizer):
             # NOTE: We don't initialise z/exp_avg here -- subclass needs to do that.
             state['muon'] = group['use_muon_pp'] and len(grad.shape) >= 2 and grad.size(0) < 10000
 
-            factored_dims = self.factored_dims(
-                grad.shape,
-                factored=group['factored'],
-                min_dim_size_to_factor=32
-            )
+            if not state['muon']:
+                factored_dims = self.factored_dims(
+                    grad.shape,
+                    factored=group['factored'],
+                    min_dim_size_to_factor=32
+                )
 
-            if factored_dims is not None:
-                dc, dr = factored_dims
-                row_shape = list(p.grad.shape)
-                row_shape[dr] = 1
-                col_shape = list(p.grad.shape)
-                col_shape[dc] = 1
-                reduce_dc = dc - 1 if dc > dr else dc
-                # Store reduction variables so we don't have to recalculate each step.
-                # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
-                # between bf16/fp16 and fp32 is negligible here.
-                state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
-                                        torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
-                                        dr, dc, reduce_dc]
-            else:
-                state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
-            
+                if factored_dims is not None:
+                    dc, dr = factored_dims
+                    row_shape = list(p.grad.shape)
+                    row_shape[dr] = 1
+                    col_shape = list(p.grad.shape)
+                    col_shape[dc] = 1
+                    reduce_dc = dc - 1 if dc > dr else dc
+                    # Store reduction variables so we don't have to recalculate each step.
+                    # Always store second moment low ranks in fp32 to avoid precision issues. Memory difference 
+                    # between bf16/fp16 and fp32 is negligible here.
+                    state["exp_avg_sq"] = [torch.zeros(row_shape, dtype=torch.float32, device=p.device).detach(), 
+                                            torch.zeros(col_shape, dtype=torch.float32, device=p.device).detach(), 
+                                            dr, dc, reduce_dc]
+                else:
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format).detach()
+
             # If the initial weights are zero, don't bother storing them.
             if p.any() > 0:
                 state['p0'] = sliced_data.to(dtype=dtype, memory_format=torch.preserve_format, copy=True).detach()
@@ -308,6 +309,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                 self.update_d_and_reset(group)
 
             group['k'] = k + 1
+
             return True
 
         return False
@@ -315,8 +317,8 @@ class CoreOptimiser(torch.optim.Optimizer):
     def get_dlr(self, group):
         lr = group['lr']
 
-        d = group['d']
-        dlr = (self.shared_d if self.split_groups and self.shared_d else d) * lr
+        dlr = (self.shared_d if self.split_groups and self.shared_d else group['d']) * lr
+        dlr = max(dlr, group['d0'])
        
         return dlr
 
@@ -349,7 +351,7 @@ class CoreOptimiser(torch.optim.Optimizer):
             del state['s']
             del state['p0']
 
-    def get_update(self, num, denom, group):
+    def update_(self, num, denom, group):
         d = group['d']
         eps = group['eps']
         
@@ -390,12 +392,18 @@ class CoreOptimiser(torch.optim.Optimizer):
 
         return exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
 
-    def update_second_moment(self, state, group, grad, beta2, return_denom=True):
+    def update_second_moment(self, state, group, grad, beta2, return_denom=True, denom_before_update=False):
         exp_avg_sq = state['exp_avg_sq']
+        denom = None
+
+        if return_denom and denom_before_update:
+            denom = self.get_denom(state)
 
         # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
         if group['use_bias_correction']:
-            beta2 = min(1 - group['k'] ** -0.8, beta2)
+            k = group['k']
+            debias = 1 - k ** -0.8
+            beta2 = min(beta2, 1 - ((1 - debias) / (1 - debias ** k)))
    
         # Adam EMA updates
         if isinstance(exp_avg_sq, list):
@@ -412,7 +420,10 @@ class CoreOptimiser(torch.optim.Optimizer):
         else:
             exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-        return self.get_denom(state) if return_denom else None
+        if return_denom and denom is None:
+            denom = self.get_denom(state)
+
+        return denom
         
     def rms_(self, tensor, rms_min):
         rms = tensor.norm().div(tensor.numel() ** 0.5).clamp_min(rms_min)

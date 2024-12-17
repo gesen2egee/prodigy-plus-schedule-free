@@ -178,7 +178,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         state, needs_init = self.initialise_state_internal(p, group)
 
         if needs_init:
-            state['z'] = p.detach().clone(memory_format=torch.preserve_format)        
+            state['z'] = p.detach().clone(memory_format=torch.preserve_format)
         
         return state
     
@@ -217,38 +217,33 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         
         if p.grad is not None:
             grad = p.grad.float()
+            grad_mask = grad.clone() if group['use_cautious'] else None
+            rms_min = 1.0 if group['use_stableadamw'] else None
 
             state = self.initialise_state(p, group)
-            use_muon = state['muon']
-            use_adopt = group['use_adopt']
-            _, beta2 = group['betas']
+            y, z = p, state['z']
+
+            self.update_prodigy(state, group, grad, z)
+            update = None
             
-            if use_adopt and group['k'] == 1:
-                if use_muon:
-                    grad = self.newton_schulz_(grad)
-
-                self.update_second_moment(state, group, grad, 0, return_denom=False)
+            if state['muon']:
+                rms_min = 1e-7
+                # Use high epsilon at start of training so
+                # Prodigy doesn't take forever to adapt the stepsize.
+                eps = max(rms_min, 0.2 ** group['k'] ** 0.5)
+                update = self.newton_schulz_(grad, eps=eps)
             else:
-                dlr = self.get_dlr(group)
-                rms_min = 1.0 if group['use_stableadamw'] else None
-                y, z = p, state['z']
+                use_adopt = group['use_adopt']
 
-                self.update_prodigy(state, group, grad, z)
-
-                grad_mask = grad.clone() if group['use_cautious'] else None
-
-                if use_muon:
-                    grad = self.newton_schulz_(grad)
-
-                if use_adopt:
-                    denom = self.get_denom(state)
-                    self.update_second_moment(state, group, grad, beta2, return_denom=False)
+                if use_adopt and group['k'] == 1:
+                    self.update_second_moment(state, group, grad, 0, return_denom=False)
                 else:
-                    denom = self.update_second_moment(state, group, grad, beta2)
+                    _, beta2 = group['betas']
+                    denom = self.update_second_moment(state, group, grad, beta2, denom_before_update=use_adopt)
+                    update = self.update_(grad, denom, group)
+                    del denom
 
-                update = self.get_update(grad, denom, group)
-                del denom
-
+            if update is not None:
                 if rms_min is not None:
                     self.rms_(update, rms_min)
 
