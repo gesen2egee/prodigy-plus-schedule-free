@@ -181,7 +181,8 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
         return state
     
     @torch.no_grad()
-    def update_params(self, y, z, update, dlr, group):
+    def update_params(self, y, z, update, group):
+        dlr = self.get_dlr(group)
         decay = group['weight_decay']
         beta1, _ = group['betas']
 
@@ -256,14 +257,14 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                 if group['stochastic_rounding'] and y.dtype == z.dtype == torch.bfloat16:
                     y_fp32, z_fp32 = y.float(), z.float()
 
-                    weight_sum = self.update_params(y_fp32, z_fp32, update, dlr, group)
+                    weight_sum = self.update_params(y_fp32, z_fp32, update, group)
 
                     self.copy_stochastic_(y, y_fp32)
                     self.copy_stochastic_(z, z_fp32)
 
                     del y_fp32, z_fp32
                 else:
-                    weight_sum = self.update_params(y, z, update, dlr, group)
+                    weight_sum = self.update_params(y, z, update, group)
 
                 del update
 
