@@ -18,6 +18,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                  use_stableadamw=True,
                  use_muon_pp=False,
                  use_cautious=False,
+                 use_grams=False,
                  use_adopt=False,
                  stochastic_rounding=True):
 
@@ -52,6 +53,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                         use_stableadamw=use_stableadamw,
                         use_muon_pp=use_muon_pp,
                         use_cautious=use_cautious,
+                        use_grams=use_grams,
                         use_adopt=use_adopt,
                         stochastic_rounding=stochastic_rounding)
 
@@ -439,11 +441,17 @@ class CoreOptimiser(torch.optim.Optimizer):
         del mask
 
         return update
-    
+
     def cautious_mask(self, update, grad):
         mask = (grad * update > 0).to(dtype=grad.dtype)
         mask.div_(mask.mean().clamp_min(1e-3))
         return mask
+
+    # "Grams: Gradient Descent with Adaptive Momentum Scaling"
+    # https://arxiv.org/abs/2412.17107
+    def grams_(self, update, grad):
+        update.copy_(torch.sign(grad) * update.abs())
+        return update
 
     @torch.no_grad()
     def step_param(self, p, group):

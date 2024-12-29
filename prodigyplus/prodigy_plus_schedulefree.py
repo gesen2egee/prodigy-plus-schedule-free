@@ -134,6 +134,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                  use_stableadamw=True,
                  use_muon_pp=False,
                  use_cautious=False,
+                 use_grams=False,
                  use_adopt=False,
                  stochastic_rounding=True):
         
@@ -144,8 +145,8 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                          eps=eps, split_groups=split_groups,
                          split_groups_mean=split_groups_mean, factored=factored,
                          fused_back_pass=fused_back_pass, use_stableadamw=use_stableadamw,
-                         use_muon_pp=use_muon_pp, use_cautious=use_cautious, use_adopt=use_adopt,
-                         stochastic_rounding=stochastic_rounding)
+                         use_muon_pp=use_muon_pp, use_cautious=use_cautious, use_grams=use_grams,
+                         use_adopt=use_adopt, stochastic_rounding=stochastic_rounding)
 
     @torch.no_grad()
     def eval(self):
@@ -250,6 +251,9 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                 if grad_mask is not None:
                     self.cautious_(update, grad_mask)
                     del grad_mask
+
+                if group['use_grams']:
+                    self.grams_(update, grad)
 
                 if group['stochastic_rounding'] and y.dtype == z.dtype == torch.bfloat16:
                     y_fp32, z_fp32 = y.float(), z.float()
