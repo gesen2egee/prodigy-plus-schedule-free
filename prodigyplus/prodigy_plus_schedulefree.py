@@ -136,6 +136,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                  fused_back_pass=False,
                  use_stableadamw=True,
                  use_muon_pp=False,
+                 use_mars=False,
                  use_cautious=False,
                  use_grams=False,
                  use_adopt=False,
@@ -148,8 +149,8 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                          eps=eps, split_groups=split_groups,
                          split_groups_mean=split_groups_mean, factored=factored,
                          fused_back_pass=fused_back_pass, use_stableadamw=use_stableadamw,
-                         use_muon_pp=use_muon_pp, use_cautious=use_cautious, use_grams=use_grams, 
-                         use_adopt=use_adopt, stochastic_rounding=stochastic_rounding)
+                         use_muon_pp=use_muon_pp, use_mars=use_mars, use_cautious=use_cautious,
+                         use_grams=use_grams, use_adopt=use_adopt, stochastic_rounding=stochastic_rounding)
 
     @torch.no_grad()
     def eval(self):
@@ -246,7 +247,7 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
 
             use_adopt = group['use_adopt']  
             stochastic = group['stochastic_rounding']
-            _, beta2 = group['betas']
+            beta1, beta2 = group['betas']
             k = group['k']
 
             state = self.initialise_state(p, group)
@@ -261,7 +262,17 @@ class ProdigyPlusScheduleFree(CoreOptimiser):
                 state["rms_sq"] = rms_sq
 
                 update = grad.mul_(1.0 / ((rms_sq ** 0.5) + 1e-8))
-            else:
+            else:                
+                # "MARS: Unleashing the Power of Variance Reduction for Training Large Models": https://arxiv.org/abs/2411.10438
+                # https://github.com/AGI-Arena/MARS/blob/main/MARS/optimizers/mars.py
+                if group['use_mars'] and (len(grad.shape) == 2):
+                    c_t = (grad - state['last_grad']).mul(gamma * (beta1 / (1. - beta1))).add(grad)
+                    c_t_norm = torch.norm(c_t)
+                    if c_t_norm > 1.:
+                        c_t = c_t / c_t_norm
+                    state['last_grad'].copy_(grad)
+                    grad = c_t
+
                 if group['use_bias_correction']:
                     # Adafactor / PaLM beta2 decay. Clip beta2 as per Scaling ViT paper.
                     beta2 = min(beta2, 1 - k ** -0.8)

@@ -17,6 +17,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                  fused_back_pass=False,
                  use_stableadamw=True,
                  use_muon_pp=False,
+                 use_mars=False,
                  use_cautious=False,
                  use_grams=False,
                  use_adopt=False,
@@ -64,6 +65,7 @@ class CoreOptimiser(torch.optim.Optimizer):
                         factored=factored,
                         use_stableadamw=use_stableadamw,
                         use_muon_pp=use_muon_pp,
+                        use_mars=use_mars,
                         use_cautious=use_cautious,
                         use_grams=use_grams,
                         use_adopt=use_adopt,
@@ -230,6 +232,9 @@ class CoreOptimiser(torch.optim.Optimizer):
 
             # NOTE: We don't initialise z/exp_avg here -- subclass needs to do that.
             state['muon'] = group['use_muon_pp'] and len(grad.shape) >= 2
+
+            if group['use_mars'] and (len(grad.shape) == 2)::
+                state["last_grad"] = torch.zeros_like(p)
 
             if state['muon']:
                 state["rms_sq"] = 0
